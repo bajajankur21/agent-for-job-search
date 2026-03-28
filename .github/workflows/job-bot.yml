@@ -1,0 +1,34 @@
+name: AI Job Search Bot
+
+on:
+  schedule:
+    - cron: '0 9 * * *' # Runs at 9:00 AM UTC every day
+  workflow_dispatch:     # Allows you to click a button to run it manually
+
+jobs:
+  run-agents:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install google-generativeai anthropic boto3 pydantic python-dotenv fpdf
+
+    - name: Run AI Pipeline
+      env:
+        
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_REGION: ${{ secrets.AWS_REGION }}
+      run: python main.py

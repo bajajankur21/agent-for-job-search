@@ -131,7 +131,7 @@ def build_candidate_profile(resume_pdf_path: str) -> CandidateProfile:
 
     logger.info("Building candidate profile with Claude...")
     response = client.messages.create(
-        model="claude-3-5-sonnet-20240620",
+        model="claude-3-5-sonnet-20241022",
         max_tokens=1024,
         messages=[{"role": "user", "content": prompt}]
     )

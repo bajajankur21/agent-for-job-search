@@ -1,0 +1,81 @@
+name: AI Job Application Pipeline
+
+on:
+  schedule:
+    # 9:00 AM IST = 03:30 UTC
+    - cron: '30 3 * * *'
+    # 6:00 PM IST = 12:30 UTC
+    - cron: '30 12 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-pipeline:
+    name: Run Agent Pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Run pipeline
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: python main.py
+
+  cleanup:
+    name: Nightly S3 Cleanup
+    runs-on: ubuntu-latest
+    # This job runs on its own schedule — not dependent on run-pipeline
+    if: github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Wipe S3 bucket
+        env:
+          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+        run: python -c "
+import boto3, os
+s3 = boto3.resource('s3')
+bucket = s3.Bucket(os.environ['AWS_S3_BUCKET'])
+deleted = bucket.objects.all().delete()
+print(f'Cleanup complete. Deleted {len(deleted[0][\"Deleted\"]) if deleted else 0} objects.')
+"

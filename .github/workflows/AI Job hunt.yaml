@@ -6,7 +6,7 @@ on:
     - cron: '30 3 * * *'
     # 6:00 PM IST = 12:30 UTC
     - cron: '30 12 * * *'
-  workflow_dispatch:
+  workflow_dispatch: 
 
 jobs:
   run-pipeline:
@@ -72,10 +72,4 @@ jobs:
         env:
           AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
-        run: python -c "
-import boto3, os
-s3 = boto3.resource('s3')
-bucket = s3.Bucket(os.environ['AWS_S3_BUCKET'])
-deleted = bucket.objects.all().delete()
-print(f'Cleanup complete. Deleted {len(deleted[0][\"Deleted\"]) if deleted else 0} objects.')
-"
+        run: python -c "import boto3, os s3 = boto3.resource('s3') bucket = s3.Bucket(os.environ['AWS_S3_BUCKET']) deleted = bucket.objects.all().delete() print(f'Cleanup complete. Deleted {len(deleted[0][\"Deleted\"]) if deleted else 0} objects.')"

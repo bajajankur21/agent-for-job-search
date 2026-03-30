@@ -1,12 +1,12 @@
 name: AI Job Application Pipeline
 
-on:
-  schedule:
-    # 9:00 AM IST = 03:30 UTC
-    - cron: '30 3 * * *'
-    # 6:00 PM IST = 12:30 UTC
-    - cron: '30 12 * * *'
-  workflow_dispatch: 
+# on:
+#   schedule:
+#     # 9:00 AM IST = 03:30 UTC
+#     - cron: '30 3 * * *'
+#     # 6:00 PM IST = 12:30 UTC
+#     - cron: '30 12 * * *'
+#   workflow_dispatch: 
 
 jobs:
   run-pipeline:

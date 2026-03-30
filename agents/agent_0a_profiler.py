@@ -92,7 +92,7 @@ Rules:
 Return ONLY a valid JSON object matching this exact schema. No markdown, no explanation, no code fences.
 
 Schema:
-{
+{{
   "full_name": string,
   "current_title": string,
   "total_yoe": float,
@@ -107,7 +107,7 @@ Schema:
   "max_yoe_applying_for": integer,
   "search_keywords": [string],
   "raw_summary": "one paragraph professional summary"
-}
+}}
 
 Resume text:
 ---

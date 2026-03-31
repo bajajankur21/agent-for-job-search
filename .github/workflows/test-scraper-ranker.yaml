@@ -1,11 +1,21 @@
-name: Test Scraper + Ranker
+name: Test Pipeline
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Test mode'
+        required: true
+        default: 'default'
+        type: choice
+        options:
+          - default
+          - gemini-only
+          - mock-all
 
 jobs:
-  test-scraper-ranker:
-    name: Test Agent 0B + 0C (mocked profiler)
+  test-pipeline:
+    name: Test Pipeline (${{ inputs.mode }})
     runs-on: ubuntu-latest
 
     steps:
@@ -25,4 +35,11 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
-        run: python test_pipeline.py
+        run: |
+          if [ "${{ inputs.mode }}" = "gemini-only" ]; then
+            python test_pipeline.py --gemini-only
+          elif [ "${{ inputs.mode }}" = "mock-all" ]; then
+            python test_pipeline.py --mock agent_0a,agent_0b,agent_0c,agent_1,agent_2,agent_3
+          else
+            python test_pipeline.py
+          fi

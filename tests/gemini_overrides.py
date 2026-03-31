@@ -24,7 +24,7 @@ from agents.agent_2 import TailoredAssets, SYSTEM_PROMPT
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-3.1-flash"
+GEMINI_MODEL = "gemini-2.5-flash"
 
 
 def _get_gemini_model() -> genai.GenerativeModel:

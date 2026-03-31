@@ -64,7 +64,7 @@ def run_gatekeeper(job: JobListing, max_yoe: int = 3) -> GatekeeperResult:
         raise EnvironmentError("GEMINI_API_KEY not set")
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-3.1-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
 
     prompt = EXTRACTION_PROMPT.format(
         job_description=f"{job.title} at {job.company}\n\n{job.description}"

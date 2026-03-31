@@ -57,7 +57,7 @@ def build_candidate_profile_gemini(resume_pdf_path: str) -> CandidateProfile:
     logger.info("[GEMINI OVERRIDE] Building candidate profile with Gemini Flash...")
     response = model.generate_content(
         prompt,
-        generation_config=genai.GenerationConfig(temperature=0.0, max_output_tokens=1024),
+        generation_config=genai.GenerationConfig(temperature=0.0, max_output_tokens=2048),
     )
 
     raw = _strip_fences(response.text)

@@ -29,57 +29,49 @@ def _make_job_id(company: str, title: str) -> str:
 
 def _build_search_queries(profile: CandidateProfile) -> list[str]:
     """
-    Generates 8 SDE-specific queries from the candidate profile.
-    
-    Design principle: every query contains at least one hard technical
-    keyword so Google Jobs never returns marketing/finance/sales roles.
-    Queries vary across skill combinations and seniority signals to
-    maximise coverage without duplicating results.
+    Generates short, high-yield search queries for Google Jobs.
+
+    Design principle: Google Jobs works best with simple 2-4 word queries.
+    Long, specific queries return zero results. Each query is a concise
+    role title optionally combined with ONE location or skill term.
     """
-    # Pull the top skills from profile — these are the hard technical anchors
-    skills = profile.search_keywords or ["React", "TypeScript", "frontend"]
-    top3 = skills[:3]
-    mid3 = skills[3:6] if len(skills) >= 6 else skills[:3]
+    keywords = profile.search_keywords or ["Software Engineer", "Developer"]
+    locations = profile.preferred_locations or ["Bengaluru"]
+    primary_location = locations[0]  # Usually "Bengaluru"
 
-    # Seniority label Google Jobs understands
-    seniority_label = {
-        "junior": "junior software engineer",
-        "mid": "software engineer II",
-        "senior": "senior software engineer",
-        "staff": "staff engineer"
-    }.get(profile.seniority, "software engineer")
+    # Top skills for combining with generic titles
+    top_skills = (profile.core_skills + profile.frameworks)[:4]
 
-    queries = [
-        # Core role + primary skills + location
-        f"{' '.join(top3)} {seniority_label} Bengaluru product company",
-        f"{' '.join(top3)} {seniority_label} remote India product",
+    queries = []
 
-        # Alt skills variation
-        f"{' '.join(mid3)} software engineer Bengaluru",
-        f"{' '.join(mid3)} developer remote India",
+    # 1. Each search keyword + primary location (most direct)
+    for kw in keywords[:5]:
+        queries.append(f"{kw} {primary_location}")
 
-        # Domain-specific (HealthTech, Design Systems, etc.)
-        *[
-            f"{domain} {seniority_label} Bengaluru"
-            for domain in (profile.domains or [])[:2]
-        ],
+    # 2. Each search keyword + remote
+    for kw in keywords[:3]:
+        queries.append(f"{kw} remote India")
 
-        # Title-driven queries — catches jobs that list the exact role
-        f"{profile.current_title} Bengaluru startup",
-        f"{profile.current_title} remote India product based",
+    # 3. Skill-anchored queries: "React developer Bengaluru"
+    for skill in top_skills[:3]:
+        queries.append(f"{skill} developer {primary_location}")
 
-        # Broad fallback with hard SDE anchor to avoid non-tech roles
-        f"software engineer {top3[0]} Bengaluru OR remote India",
-    ]
+    # 4. Current title as-is (if short enough)
+    if profile.current_title and len(profile.current_title.split()) <= 4:
+        queries.append(f"{profile.current_title} {primary_location}")
 
-    # Deduplicate and cap at 8 queries
+    # 5. Generic fallback
+    queries.append(f"software engineer {primary_location}")
+
+    # Deduplicate (case-insensitive) and cap at 10 queries
     seen = set()
     final = []
     for q in queries:
-        if q not in seen:
-            seen.add(q)
+        q_key = q.lower().strip()
+        if q_key not in seen:
+            seen.add(q_key)
             final.append(q)
-        if len(final) == 8:
+        if len(final) == 10:
             break
 
     logger.info(f"Generated {len(final)} search queries:")
@@ -101,7 +93,7 @@ def _search_single_query(query: str, serp_api_key: str) -> list[dict]:
         "location": "India",
         "hl": "en",
         "gl": "in",
-        "chips": "date_posted:today",
+        "chips": "date_posted:3days",
         "num": "20",
         "api_key": serp_api_key,
     }

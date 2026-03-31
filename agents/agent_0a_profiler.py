@@ -84,7 +84,7 @@ Rules:
 - If a field cannot be determined, use a sensible default — never omit a field.
 - For total_yoe: calculate from work history dates if present, otherwise estimate from seniority signals.
 - For seniority: infer from titles, YOE, and scope of responsibilities.
-- For search_keywords: generate 6-10 job search keywords this person should use on job boards. Think like a recruiter — what would they search to find this person's next role?
+- For search_keywords: generate 6-10 SHORT job title keywords (1-3 words each) for Google Jobs search. Examples: "React Developer", "Backend Engineer", "Python Developer", "SDE", "Full Stack". Do NOT generate long phrases — each keyword should be a concise role title or skill that works as a standalone search term.
 - For company_type_preference: always set to "product" unless the resume strongly signals service/consulting background.
 - For preferred_locations: default to ["Bengaluru", "Remote"] unless other locations are stated.
 - For max_yoe_applying_for: set to total_yoe + 1, capped at 4.

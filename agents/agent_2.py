@@ -1,124 +1,164 @@
 import os
 import json
 import logging
-from pydantic import BaseModel, Field
-from anthropic import Anthropic
+import boto3
+from datetime import datetime
+from io import BytesIO
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY
 from dotenv import load_dotenv
-from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
+from agents.agent_1 import TailoredAssets
 
 load_dotenv()
 logger = logging.getLogger(__name__)
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 
-class TailoredAssets(BaseModel):
-    resume_bullets: list[str] = Field(
-        description="6-8 tailored resume bullet points for this specific job"
+def _sanitize_filename(text: str) -> str:
+    """Converts 'GE HealthCare' → 'GEHealthCare' for safe S3 keys."""
+    return "".join(c for c in text if c.isalnum() or c in "-_")
+
+
+def _build_resume_pdf(assets: TailoredAssets, profile_name: str) -> bytes:
+    """Generates a clean resume PDF with tailored bullet points."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=20*mm,
+        leftMargin=20*mm,
+        topMargin=20*mm,
+        bottomMargin=20*mm
     )
-    cover_letter: str = Field(
-        description="Full cover letter text, 3 paragraphs"
+
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        "Title", parent=styles["Heading1"],
+        fontSize=16, spaceAfter=4
     )
-    form_answers: dict = Field(
-        description="Structured answers for common application form fields"
+    subtitle_style = ParagraphStyle(
+        "Subtitle", parent=styles["Normal"],
+        fontSize=11, spaceAfter=12, textColor=(0.4, 0.4, 0.4)
     )
-    job_title_used: str
-    company_name_used: str
+    bullet_style = ParagraphStyle(
+        "Bullet", parent=styles["Normal"],
+        fontSize=10.5, spaceAfter=6, leading=14,
+        leftIndent=12, alignment=TA_LEFT
+    )
+
+    story = []
+    story.append(Paragraph(profile_name, title_style))
+    story.append(Paragraph(
+        f"Tailored for: {assets.job_title_used} at {assets.company_name_used}",
+        subtitle_style
+    ))
+    story.append(Spacer(1, 6*mm))
+    story.append(Paragraph("Relevant Experience Highlights", styles["Heading2"]))
+    story.append(Spacer(1, 3*mm))
+
+    for bullet in assets.resume_bullets:
+        story.append(Paragraph(f"• {bullet}", bullet_style))
+
+    doc.build(story)
+    return buffer.getvalue()
 
 
-SYSTEM_PROMPT = """You are an expert technical resume writer and career coach.
-You tailor resumes and cover letters to specific job descriptions.
-Your output is always precise, achievement-oriented, and passes ATS scanners.
-Never fabricate experience. Only amplify and reframe what exists in the master resume."""
+def _build_cover_letter_pdf(assets: TailoredAssets, profile_name: str) -> bytes:
+    """Generates a professional cover letter PDF."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        rightMargin=25*mm,
+        leftMargin=25*mm,
+        topMargin=25*mm,
+        bottomMargin=25*mm
+    )
+
+    styles = getSampleStyleSheet()
+    header_style = ParagraphStyle(
+        "Header", parent=styles["Normal"],
+        fontSize=11, spaceAfter=16
+    )
+    body_style = ParagraphStyle(
+        "Body", parent=styles["Normal"],
+        fontSize=10.5, leading=16, spaceAfter=12,
+        alignment=TA_JUSTIFY
+    )
+
+    today = datetime.now().strftime("%B %d, %Y")
+    story = []
+    story.append(Paragraph(f"{profile_name}<br/>{today}", header_style))
+    story.append(Paragraph(
+        f"Hiring Manager<br/>{assets.company_name_used}", header_style
+    ))
+    story.append(Spacer(1, 4*mm))
+
+    for para in assets.cover_letter.split("\n\n"):
+        if para.strip():
+            story.append(Paragraph(para.strip(), body_style))
+
+    doc.build(story)
+    return buffer.getvalue()
 
 
-def run_tailor(
+def publish_to_s3(
     job: JobListing,
-    profile: CandidateProfile,
-    master_resume_text: str
-) -> TailoredAssets:
+    assets: TailoredAssets,
+    profile_name: str
+) -> dict[str, str]:
     """
-    Calls Claude 3.5 Sonnet with prompt caching on the master resume.
-    The master_resume_text block is cached — paid at full price on first call,
-    ~10% cost on all subsequent calls within the 5-minute cache window.
+    Uploads 3 files to S3. Returns dict of {asset_type: s3_url}.
+    S3 key structure: YYYY-MM-DD/CompanyName_RoleTitle/filename
     """
+    bucket_name = os.getenv("AWS_S3_BUCKET")
+    if not bucket_name:
+        raise EnvironmentError("AWS_S3_BUCKET not set")
 
-    user_prompt = f"""
-Here is the job I am applying to:
+    s3 = boto3.client("s3")
+    date_prefix = datetime.now().strftime("%Y-%m-%d")
+    company_clean = _sanitize_filename(job.company)
+    title_clean = _sanitize_filename(job.title)
+    folder = f"{date_prefix}/{company_clean}_{title_clean}"
 
-Company: {job.company}
-Role: {job.title}
-Location: {job.location}
-Job Description:
----
-{job.description}
----
+    uploads = {}
 
-My candidate profile summary: {profile.raw_summary}
-
-Please produce the following as a single JSON object (no markdown, no explanation):
-
-{{
-  "resume_bullets": [
-    "6 to 8 bullet points that reframe my experience for THIS specific job.",
-    "Each bullet: Action verb + specific technology/skill from JD + quantified impact.",
-    "Pull metrics and specifics from my master resume — never invent numbers."
-  ],
-  "cover_letter": "Full 3-paragraph cover letter. Para 1: why this role + company. Para 2: most relevant 2-3 experiences mapped to their requirements. Para 3: closing with specific value proposition.",
-  "form_answers": {{
-    "describe_last_role": "2-3 sentences about most recent job, tailored to this JD",
-    "describe_second_last_role": "2-3 sentences about second most recent job, tailored to this JD",
-    "why_this_company": "2 sentences specific to this company",
-    "biggest_achievement": "One STAR-format achievement most relevant to this JD",
-    "notice_period": "Immediate to 30 days",
-    "expected_ctc": "Open to discussion based on role scope"
-  }},
-  "job_title_used": "{job.title}",
-  "company_name_used": "{job.company}"
-}}
-"""
-
-    logger.info(f"Calling Claude for tailoring: '{job.title}' @ {job.company}")
-
-    response = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=2048,
-        system=SYSTEM_PROMPT,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    # This block is cached — Anthropic stores the processed
-                    # version for 5 minutes after first call
-                    {
-                        "type": "text",
-                        "text": f"Here is my complete master resume for reference:\n\n{master_resume_text}",
-                        "cache_control": {"type": "ephemeral"}
-                    },
-                    {
-                        "type": "text",
-                        "text": user_prompt
-                    }
-                ]
-            }
-        ]
+    # 1. Resume PDF
+    resume_bytes = _build_resume_pdf(assets, profile_name)
+    resume_key = f"{folder}/resume.pdf"
+    s3.put_object(
+        Bucket=bucket_name,
+        Key=resume_key,
+        Body=resume_bytes,
+        ContentType="application/pdf"
     )
+    uploads["resume"] = f"s3://{bucket_name}/{resume_key}"
+    logger.info(f"Uploaded resume: {resume_key}")
 
-    # Log cache performance
-    usage = response.usage
-    logger.info(
-        f"Token usage — input: {usage.input_tokens}, "
-        f"output: {usage.output_tokens}, "
-        f"cache_read: {getattr(usage, 'cache_read_input_tokens', 0)}, "
-        f"cache_write: {getattr(usage, 'cache_creation_input_tokens', 0)}"
+    # 2. Cover letter PDF
+    cover_bytes = _build_cover_letter_pdf(assets, profile_name)
+    cover_key = f"{folder}/cover_letter.pdf"
+    s3.put_object(
+        Bucket=bucket_name,
+        Key=cover_key,
+        Body=cover_bytes,
+        ContentType="application/pdf"
     )
+    uploads["cover_letter"] = f"s3://{bucket_name}/{cover_key}"
+    logger.info(f"Uploaded cover letter: {cover_key}")
 
-    raw = response.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = "\n".join(raw.split("\n")[1:-1])
+    # 3. Form answers JSON
+    form_key = f"{folder}/form_answers.json"
+    s3.put_object(
+        Bucket=bucket_name,
+        Key=form_key,
+        Body=json.dumps(assets.form_answers, indent=2),
+        ContentType="application/json"
+    )
+    uploads["form_answers"] = f"s3://{bucket_name}/{form_key}"
+    logger.info(f"Uploaded form answers: {form_key}")
 
-    try:
-        data = json.loads(raw)
-        return TailoredAssets(**data)
-    except Exception as e:
-        raise ValueError(f"Agent 2 JSON parse failed for '{job.title}': {e}\nRaw: {raw}")
+    return uploads

@@ -6,9 +6,7 @@ Update these to match your actual resume / expected test data.
 
 from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
-from agents.agent_0c_ranker import rank_and_filter_jobs
-from agents.agent_1 import GatekeeperResult
-from agents.agent_2 import TailoredAssets
+from agents.agent_1 import TailoredAssets
 
 
 def mock_agent_0a() -> CandidateProfile:
@@ -87,25 +85,12 @@ def mock_agent_0b() -> list[JobListing]:
     ]
 
 
-def mock_agent_0c(
-    jobs: list[JobListing],
-) -> list[tuple[JobListing, int]]:
+def mock_agent_0c(jobs: list[JobListing]) -> list[tuple[JobListing, int]]:
     """Mock ranker — passes all jobs through with score 75."""
     return [(job, 75) for job in jobs]
 
 
-def mock_agent_1() -> GatekeeperResult:
-    """Mock gatekeeper — always passes."""
-    return GatekeeperResult(
-        minimum_yoe=1,
-        job_title="Software Engineer",
-        company_name="TestCo",
-        reasoning="Mock: auto-pass",
-        passed=True,
-    )
-
-
-def mock_agent_2(job: JobListing) -> TailoredAssets:
+def mock_agent_1(job: JobListing) -> TailoredAssets:
     """Mock tailor — returns plausible placeholder assets."""
     return TailoredAssets(
         resume_bullets=[
@@ -137,7 +122,7 @@ def mock_agent_2(job: JobListing) -> TailoredAssets:
     )
 
 
-def mock_agent_3(job: JobListing) -> dict[str, str]:
+def mock_agent_2(job: JobListing) -> dict[str, str]:
     """Mock publisher — returns fake S3 URLs."""
     return {
         "resume": f"s3://mock-bucket/2026-01-01/{job.company}_{job.title}/resume.pdf",

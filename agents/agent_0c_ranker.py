@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import logging
 from agents.agent_0a_profiler import CandidateProfile
@@ -18,7 +19,6 @@ SERVICE_COMPANY_BLACKLIST = {
     "unisys", "syntel", "mastech", "igate"
 }
 
-# If any of these appear in the job title, it's not an SDE role
 NON_SDE_TITLE_KEYWORDS = {
     "marketing", "sales", "finance", "accounting", "hr ", "human resource",
     "recruiter", "talent", "analyst", "business development", "bd ",
@@ -29,11 +29,57 @@ NON_SDE_TITLE_KEYWORDS = {
     "system administrator", "sysadmin", "database administrator", "dba"
 }
 
+# ── YOE regex pre-filter ──────────────────────────────────────────────────────
+# Runs before Gemini to eliminate obviously over-levelled jobs from the batch,
+# reducing token cost and improving scoring accuracy.
+
+_YOE_PATTERNS = [
+    (r'\b(?:minimum|min\.?|at\s+least)\s+(?:of\s+)?(\d+)\+?\s*(?:years?|yrs?)\b', 1),
+    (r'\b(\d+)\+\s*(?:years?|yrs?)\b', 1),
+    (r'\b(\d+)\s*(?:to|-|–)\s*\d+\s*(?:years?|yrs?)\b', 1),
+    (r'\b(\d+)\s+(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)\b', 1),
+    (r'\bexperience\s+of\s+(\d+)\s+(?:years?|yrs?)\b', 1),
+    (r'\bexp(?:erience)?\s*[:\-]\s*(\d+)', 1),
+]
+
+_TITLE_SENIORITY_MAP = [
+    (r'\b(staff|principal|distinguished|fellow)\b', 8),
+    (r'\b(lead|architect)\b', 6),
+    (r'\b(senior|sr\.?|specialist|l[3-6]|sde[\s-]?iii?)\b', 5),
+    (r'\b(mid[\s-]?level|intermediate|l2|sde[\s-]?ii)\b', 3),
+    (r'\b(junior|jr\.?|entry[\s-]?level|fresher|trainee|intern|l1|sde[\s-]?i)\b', 0),
+]
+
+
+def _regex_min_yoe(job: JobListing) -> int | None:
+    """
+    Extracts minimum YOE from title + description using regex.
+    Returns an int if found confidently, None if ambiguous.
+    None means: do not pre-filter — let Gemini score it.
+    """
+    text = f"{job.title}\n{job.description}".lower()
+
+    for pattern, group in _YOE_PATTERNS:
+        match = re.search(pattern, text)
+        if match:
+            return int(match.group(group))
+
+    # Title-based fallback — only the job title (first line)
+    title_lower = job.title.lower()
+    for pattern, yoe in _TITLE_SENIORITY_MAP:
+        if re.search(pattern, title_lower):
+            return yoe
+
+    return None
+
 
 def _passes_hard_filter(job: JobListing, profile: CandidateProfile) -> tuple[bool, str]:
     """
     Zero-cost Python pre-filter. Returns (passes, reason_if_rejected).
-    Cuts ~30-40% of jobs before any API call.
+    Eliminates non-SDE roles, service companies, wrong locations,
+    jobs with no technical keywords, and — critically — over-levelled
+    jobs where regex can confidently determine YOE > threshold.
+    This keeps the Gemini batch small, cheap, and focused.
     """
     title_lower = job.title.lower()
     company_lower = job.company.lower().strip()
@@ -47,7 +93,7 @@ def _passes_hard_filter(job: JobListing, profile: CandidateProfile) -> tuple[boo
     if company_lower in SERVICE_COMPANY_BLACKLIST:
         return False, f"Service company: {job.company}"
 
-    # 3. Location must be Bengaluru or Remote (hard constraint)
+    # 3. Location must be Bengaluru or Remote
     loc_lower = job.location.lower()
     location_ok = any(
         term in loc_lower
@@ -56,8 +102,7 @@ def _passes_hard_filter(job: JobListing, profile: CandidateProfile) -> tuple[boo
     if not location_ok:
         return False, f"Location not Bengaluru/Remote: '{job.location}'"
 
-    # 4. Description must mention at least one technical keyword
-    # (catches jobs scraped accidentally with no tech content)
+    # 4. Description must mention at least one of the candidate's technical keywords
     desc_lower = job.description.lower()
     tech_anchor_found = any(
         skill.lower() in desc_lower
@@ -65,6 +110,11 @@ def _passes_hard_filter(job: JobListing, profile: CandidateProfile) -> tuple[boo
     )
     if not tech_anchor_found:
         return False, "No technical keywords found in description"
+
+    # 5. YOE pre-filter — drop clearly over-levelled jobs before Gemini sees them
+    yoe = _regex_min_yoe(job)
+    if yoe is not None and yoe > profile.max_yoe_applying_for:
+        return False, f"Over-levelled: regex found {yoe} YOE > threshold {profile.max_yoe_applying_for}"
 
     return True, ""
 
@@ -78,15 +128,20 @@ Candidate profile:
 Core skills: {skills}
 Seniority: {seniority}
 Domains: {domains}
-Applying for max YOE requirement: {max_yoe}
+Max YOE the candidate is applying for: {max_yoe}
 
-Score each job listing below on a scale of 0-100 based on:
+HARD RULE — apply before any other scoring:
+If a job explicitly requires more than {max_yoe} years of experience, assign score = 0.
+This overrides all other factors. Do not reward skill match or company quality for over-levelled roles.
+
+Score each remaining job on a scale of 0-100 based on:
 - Skill match (40 points): How many of the candidate's core skills does this job require?
 - Seniority fit (25 points): Is the role level appropriate for the candidate?
 - Domain relevance (20 points): Does the domain match the candidate's background?
 - Company quality (15 points): Product company, funded startup, or known tech brand scores higher than unknown.
 
-IMPORTANT: Return ONLY a JSON array. No explanation, no markdown. One object per job, in the same order as input.
+Return ONLY a raw JSON array — no markdown, no explanation, no code fences.
+One object per job, in the same order as input.
 
 Schema: [{{"job_id": "string", "score": integer, "reason": "max 8 words"}}]
 
@@ -111,7 +166,7 @@ def _gemini_batch_score(
         raise EnvironmentError("GEMINI_API_KEY not set")
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
     # Build compact job representations — enough for scoring, not full JD
     jobs_for_scoring = [
@@ -142,7 +197,7 @@ def _gemini_batch_score(
         prompt,
         generation_config=genai.GenerationConfig(
             temperature=0.0,
-            max_output_tokens=16384,  # Gemini 2.5 Flash uses thinking tokens — need headroom
+            max_output_tokens=4096,  # ~20 tokens per job × 100 jobs, no thinking overhead
         )
     )
 

@@ -19,12 +19,12 @@ from agents.agent_0a_profiler import (
     PROFILE_EXTRACTION_PROMPT,
 )
 from agents.agent_0b_scraper import JobListing
-from agents.agent_2 import TailoredAssets, SYSTEM_PROMPT
+from agents.agent_1 import TailoredAssets, SYSTEM_PROMPT
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 
 def _get_gemini_model() -> genai.GenerativeModel:

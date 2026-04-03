@@ -210,7 +210,7 @@ def main():
             if modes["agent_2"] == "mock":
                 uploads = mock_agent_2(job)
             else:
-                uploads = publish_to_s3(job, tailored, profile.full_name)
+                uploads = publish_to_s3(job, tailored, profile, score)
 
             logger.info(f"  PUBLISHED: {uploads}")
             results.append({"job": f"{job.title} @ {job.company}", "status": "PUBLISHED"})

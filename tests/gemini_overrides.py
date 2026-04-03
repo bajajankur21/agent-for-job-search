@@ -2,7 +2,7 @@
 Drop-in Gemini replacements for agents that normally use Claude Sonnet.
 Same prompts, same Pydantic output models — just routed through Gemini Flash (free tier).
 
-Only Agent 0A (profiler) and Agent 2 (tailor) need overrides since they are
+Only Agent 0A (profiler) and Agent 1 (tailor) need overrides since they are
 the only agents that use Claude. All other agents already use Gemini or SerpAPI.
 """
 
@@ -47,7 +47,7 @@ def _extract_json(raw: str, array: bool = False) -> str:
     return raw
 
 
-# ── Agent 0A override: Profiler via Gemini ────────────────────────────────
+# ── Agent 0A override: Profiler via Gemini ────────────────────────────────────
 
 def build_candidate_profile_gemini(resume_pdf_path: str) -> CandidateProfile:
     """Same as agent_0a_profiler.build_candidate_profile but uses Gemini Flash."""
@@ -81,14 +81,14 @@ def build_candidate_profile_gemini(resume_pdf_path: str) -> CandidateProfile:
     return profile
 
 
-# ── Agent 2 override: Tailor via Gemini ───────────────────────────────────
+# ── Agent 1 override: Tailor via Gemini ──────────────────────────────────────
 
 def run_tailor_gemini(
     job: JobListing,
     profile: CandidateProfile,
     master_resume_text: str,
 ) -> TailoredAssets:
-    """Same as agent_2.run_tailor but uses Gemini Flash instead of Claude Sonnet."""
+    """Same as agent_1.run_tailor but uses Gemini Flash instead of Claude Sonnet."""
     model = _get_gemini_model()
 
     user_prompt = f"""{SYSTEM_PROMPT}
@@ -109,18 +109,50 @@ Job Description:
 
 My candidate profile summary: {profile.raw_summary}
 
-Please produce the following as a single JSON object (no markdown, no explanation):
+Produce a complete tailored resume and application materials as a single JSON object.
+No markdown, no explanation — raw JSON only.
 
+Rules:
+- Copy all experience entries and projects EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any.
+- For each experience entry, write 3-5 achievement bullets reframed toward this specific JD. Use action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
+- The summary must be 2-3 sentences positioning me for THIS specific role.
+- Skills: group into 3-4 categories (e.g. Languages, Frameworks, Tools & Cloud, Databases). Include all skills from master resume; highlight those relevant to JD first.
+- Projects: include all projects from master resume. Write 1-2 bullets per project emphasising relevance to this JD.
+- Education: single line in format "Degree | Institution | Graduation Year".
+
+Required JSON schema:
 {{
-  "resume_bullets": [
-    "6 to 8 bullet points that reframe my experience for THIS specific job.",
-    "Each bullet: Action verb + specific technology/skill from JD + quantified impact.",
-    "Pull metrics and specifics from my master resume — never invent numbers."
+  "summary": "2-3 sentence professional summary tailored to {job.title} at {job.company}",
+  "experience": [
+    {{
+      "company": "Company name from resume",
+      "title": "Job title from resume",
+      "dates": "Date range from resume e.g. Jan 2023 – Present",
+      "location": "City, Country",
+      "bullets": [
+        "Achievement bullet 1 reframed toward this JD",
+        "Achievement bullet 2",
+        "Achievement bullet 3"
+      ]
+    }}
   ],
-  "cover_letter": "Full 3-paragraph cover letter. Para 1: why this role + company. Para 2: most relevant 2-3 experiences mapped to their requirements. Para 3: closing with specific value proposition.",
+  "skills": {{
+    "Languages": ["Python", "Java"],
+    "Frameworks": ["React", "FastAPI"],
+    "Tools & Cloud": ["AWS", "Docker", "Git"]
+  }},
+  "projects": [
+    {{
+      "name": "Project name from resume",
+      "tech_stack": "comma-separated tech stack",
+      "bullets": ["What it does and its impact, framed for this JD"]
+    }}
+  ],
+  "education": "Degree | Institution | Year",
+  "cover_letter": "Full 3-paragraph cover letter. Para 1: why this role and company specifically. Para 2: 2-3 concrete experiences mapped to their requirements. Para 3: closing with specific value proposition.",
   "form_answers": {{
-    "describe_last_role": "2-3 sentences about most recent job, tailored to this JD",
-    "describe_second_last_role": "2-3 sentences about second most recent job, tailored to this JD",
+    "describe_last_role": "2-3 sentences about most recent role, tailored to this JD",
+    "describe_second_last_role": "2-3 sentences about second most recent role, tailored to this JD",
     "why_this_company": "2 sentences specific to this company",
     "biggest_achievement": "One STAR-format achievement most relevant to this JD",
     "notice_period": "Immediate to 30 days",
@@ -143,7 +175,7 @@ Please produce the following as a single JSON object (no markdown, no explanatio
                 generation_config=genai.GenerationConfig(temperature=0.3, max_output_tokens=8192),
             )
             break
-        except ResourceExhausted as e:
+        except ResourceExhausted:
             if attempt == 2:
                 raise
             wait = 60
@@ -156,4 +188,4 @@ Please produce the following as a single JSON object (no markdown, no explanatio
         data = json.loads(raw)
         return TailoredAssets(**data)
     except Exception as e:
-        raise ValueError(f"Gemini tailor JSON parse failed for '{job.title}': {e}\nRaw: {raw}")
+        raise ValueError(f"Gemini tailor JSON parse failed for '{job.title}': {e}\nRaw: {raw[:500]}")

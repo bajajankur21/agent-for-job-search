@@ -81,7 +81,7 @@ def main():
             tailored = run_tailor(job, profile, master_resume_text)
 
             # Agent 2: Publish
-            uploads = publish_to_s3(job, tailored, profile.full_name)
+            uploads = publish_to_s3(job, tailored, profile, score)
 
             results_summary.append({
                 "job": f"{job.title} @ {job.company}",

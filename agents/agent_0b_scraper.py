@@ -45,11 +45,11 @@ def _build_search_queries(profile: CandidateProfile) -> list[str]:
     queries = []
 
     # 1. Each search keyword + primary location (most direct)
-    for kw in keywords[:5]:
+    for kw in keywords[:8]:
         queries.append(f"{kw} {primary_location}")
 
     # 2. Each search keyword + remote
-    for kw in keywords[:3]:
+    for kw in keywords[:4]:
         queries.append(f"{kw} remote India")
 
     # 3. Skill-anchored queries: "React developer Bengaluru"
@@ -63,7 +63,7 @@ def _build_search_queries(profile: CandidateProfile) -> list[str]:
     # 5. Generic fallback
     queries.append(f"software engineer {primary_location}")
 
-    # Deduplicate (case-insensitive) and cap at 10 queries
+    # Deduplicate (case-insensitive) and cap at 15 queries
     seen = set()
     final = []
     for q in queries:
@@ -71,7 +71,7 @@ def _build_search_queries(profile: CandidateProfile) -> list[str]:
         if q_key not in seen:
             seen.add(q_key)
             final.append(q)
-        if len(final) == 10:
+        if len(final) == 15:
             break
 
     logger.info(f"Generated {len(final)} search queries:")
@@ -93,7 +93,7 @@ def _search_single_query(query: str, serp_api_key: str) -> list[dict]:
         "location": "India",
         "hl": "en",
         "gl": "in",
-        "chips": "date_posted:3days",
+        "chips": "date_posted:week",
         "num": "20",
         "api_key": serp_api_key,
     }

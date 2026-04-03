@@ -26,6 +26,12 @@ class CandidateProfile(BaseModel):
     seniority: str = Field(default="mid", description="junior / mid / senior / staff")
     companies: list[str] = Field(default_factory=list)
     education: Optional[str] = Field(default=None)
+    # Contact info — extracted from resume for PDF header
+    email: Optional[str] = Field(default=None)
+    phone: Optional[str] = Field(default=None)
+    linkedin: Optional[str] = Field(default=None)
+    github: Optional[str] = Field(default=None)
+    location_city: Optional[str] = Field(default=None, description="City shown in resume header")
     # Hard constraints for job matching — these are filters, not preferences
     preferred_locations: list[str] = Field(default=["Bengaluru", "Remote"])
     company_type_preference: str = Field(
@@ -84,7 +90,7 @@ Rules:
 - If a field cannot be determined, use a sensible default — never omit a field.
 - For total_yoe: calculate from work history dates if present, otherwise estimate from seniority signals.
 - For seniority: infer from titles, YOE, and scope of responsibilities.
-- For search_keywords: generate 6-10 SHORT job title keywords (1-3 words each) for Google Jobs search. Examples: "React Developer", "Backend Engineer", "Python Developer", "SDE", "Full Stack". Do NOT generate long phrases — each keyword should be a concise role title or skill that works as a standalone search term.
+- For search_keywords: generate 8-12 SHORT job title keywords (1-3 words each) for Google Jobs search. These will be used directly as search queries, so make them seniority-appropriate. For junior/entry-level candidates, include role variants like "Junior Developer", "SDE 1", "Associate Engineer", "Graduate Engineer". For mid-level, include both plain and "SDE II" style. For senior, include "Senior", "Lead". Always include plain role titles (e.g. "Backend Engineer") alongside seniority-qualified ones. Each keyword must work as a standalone search term.
 - For company_type_preference: always set to "product" unless the resume strongly signals service/consulting background.
 - For preferred_locations: default to ["Bengaluru", "Remote"] unless other locations are stated.
 - For max_yoe_applying_for: set to total_yoe + 1, capped at 4.
@@ -102,6 +108,11 @@ Schema:
   "seniority": "junior" | "mid" | "senior" | "staff",
   "companies": [string],
   "education": string | null,
+  "email": string | null,
+  "phone": string | null,
+  "linkedin": string | null,
+  "github": string | null,
+  "location_city": string | null,
   "preferred_locations": [string],
   "company_type_preference": "product" | "service" | "both",
   "max_yoe_applying_for": integer,

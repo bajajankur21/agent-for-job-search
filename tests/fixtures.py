@@ -6,21 +6,26 @@ Update these to match your actual resume / expected test data.
 
 from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
-from agents.agent_1 import TailoredAssets
+from agents.agent_1 import TailoredAssets, ExperienceEntry, ProjectEntry
 
 
 def mock_agent_0a() -> CandidateProfile:
     """Mock profiler output — edit to match your resume."""
     return CandidateProfile(
-        full_name="Ankur Bajaj",
+        full_name="Rahul Bajaj",
         current_title="Software Engineer",
-        total_yoe=2.0,
+        total_yoe=1.5,
         core_skills=["Python", "React", "Node.js", "AWS", "TypeScript"],
         frameworks=["FastAPI", "Next.js", "Django", "Express"],
-        domains=["HealthTech", "IoT"],
+        domains=["FinTech", "IoT"],
         seniority="junior",
-        companies=[],
-        education="B.Tech Computer Science",
+        companies=["Infosys BPM", "Freelance"],
+        education="B.Tech Computer Science | BITS Pilani | 2023",
+        email="rahul.bajaj@email.com",
+        phone="+91 98765 43210",
+        linkedin="linkedin.com/in/rahulbajaj",
+        github="github.com/bajajankur21",
+        location_city="Bengaluru, India",
         preferred_locations=["Bengaluru", "Remote"],
         company_type_preference="product",
         max_yoe_applying_for=3,
@@ -33,7 +38,7 @@ def mock_agent_0a() -> CandidateProfile:
             "SDE",
         ],
         raw_summary=(
-            "Junior software engineer with 2 years of experience building "
+            "Junior software engineer with 1.5 years of experience building "
             "full-stack applications using Python, React, and AWS. "
             "Comfortable with backend services, REST APIs, and cloud deployments."
         ),
@@ -91,29 +96,68 @@ def mock_agent_0c(jobs: list[JobListing]) -> list[tuple[JobListing, int]]:
 
 
 def mock_agent_1(job: JobListing) -> TailoredAssets:
-    """Mock tailor — returns plausible placeholder assets."""
+    """Mock tailor — returns plausible placeholder assets matching the full resume structure."""
     return TailoredAssets(
-        resume_bullets=[
-            "Built scalable REST APIs serving 10K+ requests/day using Python and FastAPI",
-            "Developed responsive frontend dashboards with React and TypeScript",
-            "Deployed microservices on AWS ECS with CI/CD pipelines",
-            "Reduced API latency by 40% through query optimization and caching",
-            "Implemented authentication and authorization using OAuth2 and JWT",
-            "Collaborated with cross-functional teams to ship features biweekly",
+        summary=(
+            f"Junior software engineer with 1.5 years of experience building backend services "
+            f"and React frontends, applying for {job.title} at {job.company}. "
+            "Proven track record delivering scalable REST APIs and cloud-deployed microservices."
+        ),
+        experience=[
+            ExperienceEntry(
+                company="Infosys BPM",
+                title="Software Engineer",
+                dates="Jul 2023 – Present",
+                location="Bengaluru, India",
+                bullets=[
+                    "Built scalable REST APIs serving 10K+ requests/day using Python and FastAPI",
+                    "Developed responsive frontend dashboards with React and TypeScript",
+                    "Deployed microservices on AWS ECS with CI/CD pipelines reducing release time by 30%",
+                    "Reduced API latency by 40% through query optimisation and Redis caching",
+                ],
+            ),
+            ExperienceEntry(
+                company="Freelance",
+                title="Full Stack Developer",
+                dates="Jan 2023 – Jun 2023",
+                location="Remote",
+                bullets=[
+                    "Delivered 3 client web apps using React and Node.js within tight deadlines",
+                    "Implemented OAuth2 authentication and role-based access control",
+                ],
+            ),
         ],
+        skills={
+            "Languages": ["Python", "TypeScript", "Java", "SQL"],
+            "Frameworks": ["React", "FastAPI", "Node.js", "Express"],
+            "Tools & Cloud": ["AWS (ECS, S3, Lambda)", "Docker", "Git", "PostgreSQL"],
+        },
+        projects=[
+            ProjectEntry(
+                name="Job Application Automation Agent",
+                tech_stack="Python, Claude AI, Gemini, SerpAPI, AWS S3",
+                bullets=[
+                    "Built a multi-agent pipeline that scrapes, ranks, and tailors job applications autonomously",
+                    "Reduced manual application time from 2 hours to zero per day",
+                ],
+            ),
+        ],
+        education="B.Tech Computer Science | BITS Pilani | 2023",
         cover_letter=(
-            "I am excited to apply for this role at your company. "
-            "My experience building full-stack applications with Python and React "
-            "aligns well with your requirements.\n\n"
-            "In my current role, I have built scalable backend services and "
-            "responsive frontends. I am comfortable with AWS, CI/CD, and "
-            "agile development practices.\n\n"
-            "I look forward to discussing how I can contribute to your team."
+            f"I am excited to apply for the {job.title} position at {job.company}. "
+            "Your engineering culture and focus on scalable products aligns with my background "
+            "in building high-throughput backend systems.\n\n"
+            "In my current role at Infosys BPM, I built REST APIs serving 10K+ requests/day "
+            "using Python and FastAPI, deployed microservices on AWS ECS, and reduced API latency "
+            "by 40% through caching — directly applicable to your requirements.\n\n"
+            f"I am confident I can contribute meaningfully to {job.company}'s engineering team "
+            "from day one. I look forward to discussing how my experience maps to your needs."
         ),
         form_answers={
-            "describe_last_role": "Built backend services and React frontends.",
-            "why_this_company": "Strong engineering culture and impactful product.",
-            "biggest_achievement": "Reduced API latency by 40% through caching.",
+            "describe_last_role": "Built backend APIs and React frontends at Infosys BPM.",
+            "describe_second_last_role": "Delivered full-stack client projects as a freelance developer.",
+            "why_this_company": f"Strong engineering culture and impactful product at {job.company}.",
+            "biggest_achievement": "Reduced API latency by 40% through Redis caching and query optimisation.",
             "notice_period": "Immediate to 30 days",
             "expected_ctc": "Open to discussion",
         },
@@ -123,9 +167,10 @@ def mock_agent_1(job: JobListing) -> TailoredAssets:
 
 
 def mock_agent_2(job: JobListing) -> dict[str, str]:
-    """Mock publisher — returns fake S3 URLs."""
+    """Mock publisher — returns fake S3 keys."""
     return {
-        "resume": f"s3://mock-bucket/2026-01-01/{job.company}_{job.title}/resume.pdf",
-        "cover_letter": f"s3://mock-bucket/2026-01-01/{job.company}_{job.title}/cover_letter.pdf",
-        "form_answers": f"s3://mock-bucket/2026-01-01/{job.company}_{job.title}/form_answers.json",
+        "resume": f"2026-01-01/{job.company}_{job.title}/resume.pdf",
+        "cover_letter": f"2026-01-01/{job.company}_{job.title}/cover_letter.pdf",
+        "form_answers": f"2026-01-01/{job.company}_{job.title}/form_answers.json",
+        "job_info": f"2026-01-01/{job.company}_{job.title}/job_info.json",
     }

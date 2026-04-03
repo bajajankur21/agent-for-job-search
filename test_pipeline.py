@@ -70,6 +70,10 @@ DEFAULT_MODES = {
 def parse_args():
     parser = argparse.ArgumentParser(description="Test the job pipeline with configurable agent modes.")
     parser.add_argument(
+        "--max-jobs", type=int, default=5,
+        help="Max number of jobs to process per-job agents (default 5). Use 0 for unlimited.",
+    )
+    parser.add_argument(
         "--mock", type=str, default=None,
         help="Comma-separated agents to mock, e.g. --mock agent_0a,agent_3",
     )
@@ -190,6 +194,11 @@ def main():
         logger.info(f"  [{score:3d}] {job.title} @ {job.company}")
 
     # ── Per-job: Agent 1 → 2 → 3 ─────────────────────────────────────
+    max_jobs = args.max_jobs if args.max_jobs > 0 else len(ranked_jobs)
+    if max_jobs < len(ranked_jobs):
+        logger.info(f"Limiting to top {max_jobs} jobs (--max-jobs {max_jobs})")
+        ranked_jobs = ranked_jobs[:max_jobs]
+
     results = []
     for job, score in ranked_jobs:
         logger.info(f"\n{'─' * 50}")

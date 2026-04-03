@@ -37,9 +37,9 @@ jobs:
           SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
         run: |
           if [ "${{ inputs.mode }}" = "gemini-only" ]; then
-            python test_pipeline.py --gemini-only
+            python test_pipeline.py --gemini-only --max-jobs 5
           elif [ "${{ inputs.mode }}" = "mock-all" ]; then
             python test_pipeline.py --mock agent_0a,agent_0b,agent_0c,agent_1,agent_2,agent_3
           else
-            python test_pipeline.py
+            python test_pipeline.py --max-jobs 5
           fi

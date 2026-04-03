@@ -72,12 +72,15 @@ def run_gatekeeper(job: JobListing, max_yoe: int = 3) -> GatekeeperResult:
 
     response = model.generate_content(
         prompt,
-        generation_config=genai.GenerationConfig(temperature=0.0, max_output_tokens=256)
+        generation_config=genai.GenerationConfig(temperature=0.0, max_output_tokens=1024)
     )
 
     raw = response.text.strip()
-    if raw.startswith("```"):
-        raw = "\n".join(raw.split("\n")[1:-1])
+    # Gemini 2.5 Flash may prepend thinking tokens — extract the JSON object directly
+    start = raw.find('{')
+    end = raw.rfind('}')
+    if start != -1 and end > start:
+        raw = raw[start:end + 1]
 
     try:
         data = json.loads(raw)

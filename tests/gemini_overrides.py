@@ -35,11 +35,15 @@ def _get_gemini_model() -> genai.GenerativeModel:
     return genai.GenerativeModel(GEMINI_MODEL)
 
 
-def _strip_fences(raw: str) -> str:
+def _extract_json(raw: str, array: bool = False) -> str:
+    """Extract JSON object or array from a response that may contain thinking preamble."""
     raw = raw.strip()
-    if raw.startswith("```"):
-        lines = raw.split("\n")
-        raw = "\n".join(lines[1:-1])
+    if array:
+        start, end = raw.find('['), raw.rfind(']')
+    else:
+        start, end = raw.find('{'), raw.rfind('}')
+    if start != -1 and end > start:
+        return raw[start:end + 1]
     return raw
 
 
@@ -60,7 +64,7 @@ def build_candidate_profile_gemini(resume_pdf_path: str) -> CandidateProfile:
         generation_config=genai.GenerationConfig(temperature=0.0, max_output_tokens=4096),
     )
 
-    raw = _strip_fences(response.text)
+    raw = _extract_json(response.text)
 
     try:
         data = json.loads(raw)
@@ -129,12 +133,24 @@ Please produce the following as a single JSON object (no markdown, no explanatio
 
     logger.info(f"[GEMINI OVERRIDE] Calling Gemini for tailoring: '{job.title}' @ {job.company}")
 
-    response = model.generate_content(
-        user_prompt,
-        generation_config=genai.GenerationConfig(temperature=0.3, max_output_tokens=2048),
-    )
+    import time
+    from google.api_core.exceptions import ResourceExhausted
 
-    raw = _strip_fences(response.text)
+    for attempt in range(3):
+        try:
+            response = model.generate_content(
+                user_prompt,
+                generation_config=genai.GenerationConfig(temperature=0.3, max_output_tokens=8192),
+            )
+            break
+        except ResourceExhausted as e:
+            if attempt == 2:
+                raise
+            wait = 60
+            logger.warning(f"Rate limit hit, retrying in {wait}s... (attempt {attempt + 1}/3)")
+            time.sleep(wait)
+
+    raw = _extract_json(response.text)
 
     try:
         data = json.loads(raw)

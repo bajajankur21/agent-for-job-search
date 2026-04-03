@@ -142,13 +142,16 @@ def _gemini_batch_score(
         prompt,
         generation_config=genai.GenerationConfig(
             temperature=0.0,
-            max_output_tokens=4096,  # ~40 tokens per job × 100 jobs
+            max_output_tokens=16384,  # Gemini 2.5 Flash uses thinking tokens — need headroom
         )
     )
 
     raw = response.text.strip()
-    if raw.startswith("```"):
-        raw = "\n".join(raw.split("\n")[1:-1])
+    # Gemini 2.5 Flash may prepend thinking tokens — extract the JSON array directly
+    start = raw.find('[')
+    end = raw.rfind(']')
+    if start != -1 and end > start:
+        raw = raw[start:end + 1]
 
     try:
         scored_list = json.loads(raw)

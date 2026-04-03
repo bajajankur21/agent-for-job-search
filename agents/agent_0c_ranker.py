@@ -13,10 +13,36 @@ logger = logging.getLogger(__name__)
 # ── Hard blacklists — zero cost to apply ─────────────────────────────────────
 
 SERVICE_COMPANY_BLACKLIST = {
-    "tcs", "infosys", "wipro", "hcl", "cognizant", "accenture",
-    "capgemini", "tech mahindra", "mphasis", "hexaware", "ltimindtree",
-    "persistent", "coforge", "niit", "zensar", "ibm", "dxc",
-    "unisys", "syntel", "mastech", "igate"
+    "tcs", "tata consultancy services",
+    "infosys",
+    "wipro",
+    "hcl", "hcl technologies",
+    "cognizant",
+    "accenture",
+    "capgemini",
+    "tech mahindra",
+    "mphasis",
+    "hexaware",
+    "ltimindtree", "lti", "ltm", "larsen & toubro infotech",
+    "persistent", "persistent systems",
+    "coforge",
+    "niit",
+    "zensar",
+    "ibm",
+    "dxc", "dxc technology",
+    "unisys",
+    "syntel",
+    "mastech",
+    "igate",
+    "genpact",
+    "wipro",
+    "birlasoft",
+    "mindtree",
+    "happiest minds",
+    "cyient",
+    "kpit",
+    "sonata software",
+    "kellton tech",
 }
 
 NON_SDE_TITLE_KEYWORDS = {

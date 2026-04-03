@@ -85,7 +85,7 @@ def _search_single_query(query: str, serp_api_key: str) -> list[dict]:
     """
     Calls SerpAPI Google Jobs for one query.
     num=20 is the max results per call on the free tier.
-    chips=date_posted:today ensures last 24h only.
+    chips=date_posted:week returns jobs posted in the last 7 days.
     """
     params = {
         "engine": "google_jobs",

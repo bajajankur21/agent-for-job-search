@@ -42,34 +42,48 @@ jobs:
           AWS_REGION: ${{ secrets.AWS_REGION }}
         run: python main.py
 
-  cleanup:
-    name: Nightly S3 Cleanup
-    runs-on: ubuntu-latest
-    # This job runs on its own schedule — not dependent on run-pipeline
-    if: github.event_name == 'schedule'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Wipe S3 bucket
-        env:
-          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
-          AWS_REGION: ${{ secrets.AWS_REGION }}
-        run: python -c "import boto3, os s3 = boto3.resource('s3') bucket = s3.Bucket(os.environ['AWS_S3_BUCKET']) deleted = bucket.objects.all().delete() print(f'Cleanup complete. Deleted {len(deleted[0][\"Deleted\"]) if deleted else 0} objects.')"
+#  cleanup:
+#    name: Nightly S3 Cleanup
+#    runs-on: ubuntu-latest
+#    # This job runs on its own schedule — not dependent on run-pipeline
+#    if: github.event_name == 'schedule'
+#
+#    steps:
+#      - name: Checkout code
+#        uses: actions/checkout@v4
+#
+#      - name: Set up Python
+#        uses: actions/setup-python@v5
+#        with:
+#          python-version: '3.11'
+#          cache: 'pip'
+#
+#      - name: Install dependencies
+#        run: pip install -r requirements.txt
+#
+#      - name: Configure AWS credentials
+#        uses: aws-actions/configure-aws-credentials@v4
+#        with:
+#          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#          aws-region: ${{ secrets.AWS_REGION }}
+#
+#      - name: Clean up old application folders (preserve state/)
+#        env:
+#          AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+#          AWS_REGION: ${{ secrets.AWS_REGION }}
+#        run: |
+#          python -c "
+#          import boto3, os
+#          s3 = boto3.resource('s3')
+#          bucket = s3.Bucket(os.environ['AWS_S3_BUCKET'])
+#          # Delete everything EXCEPT state/ — that folder holds seen_jobs.json
+#          # which prevents re-processing the same jobs across runs
+#          to_delete = [o for o in bucket.objects.all() if not o.key.startswith('state/')]
+#          if to_delete:
+#              resp = bucket.delete_objects(Delete={'Objects': [{'Key': o.key} for o in to_delete]})
+#              deleted = len(resp.get('Deleted', []))
+#          else:
+#              deleted = 0
+#          print(f'Cleanup complete. Deleted {deleted} application objects. State preserved.')
+#          "

@@ -52,7 +52,11 @@ NON_SDE_TITLE_KEYWORDS = {
     "product manager", "program manager", "project manager",
     "scrum master", "agile coach", "customer success", "support engineer",
     "technical support", "it support", "helpdesk", "network engineer",
-    "system administrator", "sysadmin", "database administrator", "dba"
+    "system administrator", "sysadmin", "database administrator", "dba",
+    # Senior / non-IC roles a junior candidate should never match
+    "vice president", "vp ", "vp,", " vp", "director", "head of",
+    "engineering manager", "em ", "chief", "cto", "cio", "cfo",
+    "general manager", "gm ", "avp", "svp", "evp",
 }
 
 # ── YOE regex pre-filter ──────────────────────────────────────────────────────
@@ -60,20 +64,27 @@ NON_SDE_TITLE_KEYWORDS = {
 # reducing token cost and improving scoring accuracy.
 
 _YOE_PATTERNS = [
-    (r'\b(?:minimum|min\.?|at\s+least)\s+(?:of\s+)?(\d+)\+?\s*(?:years?|yrs?)\b', 1),
-    (r'\b(\d+)\+\s*(?:years?|yrs?)\b', 1),
-    (r'\b(\d+)\s*(?:to|-|–)\s*\d+\s*(?:years?|yrs?)\b', 1),
+    # Explicit requirement phrases — high confidence
+    (r'\b(?:minimum|min\.?|at\s+least)\s+(?:of\s+)?(\d+)\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)', 1),
+    (r'\b(?:require[sd]?|expecting|need[sd]?)\s+(\d+)\+?\s*(?:years?|yrs?)', 1),
+    # "N+ years of experience" — must have experience/exp anchor to avoid matching company descriptions
+    (r'\b(\d+)\+\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp|relevant|professional|hands[\s-]?on|working)', 1),
+    # Range: "2-5 years experience"
+    (r'\b(\d+)\s*(?:to|-|–)\s*\d+\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)', 1),
+    # "N years of experience"
     (r'\b(\d+)\s+(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)\b', 1),
+    # "experience of N years"
     (r'\bexperience\s+of\s+(\d+)\s+(?:years?|yrs?)\b', 1),
+    # "exp: 5" or "experience: 5"
     (r'\bexp(?:erience)?\s*[:\-]\s*(\d+)', 1),
 ]
 
 _TITLE_SENIORITY_MAP = [
     (r'\b(staff|principal|distinguished|fellow)\b', 8),
     (r'\b(lead|architect)\b', 6),
-    (r'\b(senior|sr\.?|specialist|l[3-6]|sde[\s-]?iii?)\b', 5),
-    (r'\b(mid[\s-]?level|intermediate|l2|sde[\s-]?ii)\b', 3),
-    (r'\b(junior|jr\.?|entry[\s-]?level|fresher|trainee|intern|l1|sde[\s-]?i)\b', 0),
+    (r'\b(senior|sr\.?|specialist|l[3-6]|sde[\s-]?iii)\b', 5),
+    (r'\b(mid[\s-]?level|intermediate|l2|sde[\s-]?ii(?!i))\b', 3),
+    (r'\b(junior|jr\.?|entry[\s-]?level|fresher|trainee|intern|l1|sde[\s-]?i(?!i))\b', 0),
 ]
 
 
@@ -201,9 +212,9 @@ def _gemini_batch_score(
             "title": job.title,
             "company": job.company,
             "location": job.location,
-            # Truncate description to 300 chars — enough for scoring,
-            # saves tokens significantly at 100 jobs
-            "description_preview": job.description[:300]
+            # Truncate description to 600 chars — needs to be long enough
+            # to capture YOE requirements which are often mid-description
+            "description_preview": job.description[:600]
         }
         for job in jobs
     ]
@@ -223,7 +234,7 @@ def _gemini_batch_score(
         prompt,
         generation_config=genai.GenerationConfig(
             temperature=0.0,
-            max_output_tokens=4096,  # ~20 tokens per job × 100 jobs, no thinking overhead
+            max_output_tokens=6144,  # ~20 tokens per job × 100 jobs + buffer for larger descriptions
         )
     )
 

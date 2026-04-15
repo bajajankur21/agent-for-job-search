@@ -69,11 +69,13 @@ Job Description:
 ---
 
 My candidate profile summary: {profile.raw_summary}
+Total years of experience: {profile.total_yoe}
 
 Produce a complete tailored resume and application materials as a single JSON object.
 No markdown, no explanation — raw JSON only.
 
 Rules:
+- CRITICAL: The candidate has exactly {profile.total_yoe} years of experience. Always use this exact number. Do NOT calculate, estimate, or round YOE from resume dates — use {profile.total_yoe} as-is.
 - Copy all experience entries and projects EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any.
 - For each experience entry, write 3-5 achievement bullets reframed toward this specific JD. Use action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
 - The summary must be 2-3 sentences positioning me for THIS specific role.
@@ -83,7 +85,7 @@ Rules:
 
 Required JSON schema:
 {{
-  "summary": "2-3 sentence professional summary tailored to {job.title} at {job.company}",
+  "summary": "WRITE a 2-3 sentence professional summary positioning the candidate for this specific role. Do NOT include the words 'tailored to' or 'tailored for'.",
   "experience": [
     {{
       "company": "Company name from resume",
@@ -112,15 +114,15 @@ Required JSON schema:
   "education": "Degree | Institution | Year",
   "cover_letter": "Full 3-paragraph cover letter. Para 1: why this role and company specifically. Para 2: 2-3 concrete experiences mapped to their requirements. Para 3: closing with specific value proposition.",
   "form_answers": {{
-    "describe_last_role": "2-3 sentences about most recent role, tailored to this JD",
-    "describe_second_last_role": "2-3 sentences about second most recent role, tailored to this JD",
+    "describe_last_role": "2-3 sentences about most recent role relevant to this JD",
+    "describe_second_last_role": "2-3 sentences about second most recent role relevant to this JD",
     "why_this_company": "2 sentences specific to this company",
     "biggest_achievement": "One STAR-format achievement most relevant to this JD",
     "notice_period": "Immediate to 30 days",
     "expected_ctc": "Open to discussion based on role scope"
   }},
-  "job_title_used": "{job.title}",
-  "company_name_used": "{job.company}"
+  "job_title_used": "the exact job title from the listing above",
+  "company_name_used": "the exact company name from the listing above"
 }}
 """
 

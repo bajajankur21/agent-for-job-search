@@ -160,7 +160,7 @@ def main():
         raw_jobs = mock_agent_0b()
     else:
         logger.info("[AGENT 0B] Scraping jobs via SerpAPI (live)")
-        raw_jobs = scrape_jobs(profile, target_raw=150)
+        raw_jobs = scrape_jobs(profile, target_raw=80)
 
     if not raw_jobs:
         logger.warning("No jobs found. Check SerpAPI key and search queries.")

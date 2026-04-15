@@ -45,25 +45,18 @@ def _build_search_queries(profile: CandidateProfile) -> list[str]:
     queries = []
 
     # 1. Each search keyword + primary location (most direct)
-    for kw in keywords[:8]:
+    for kw in keywords[:5]:
         queries.append(f"{kw} {primary_location}")
 
-    # 2. Each search keyword + remote
-    for kw in keywords[:4]:
+    # 2. Top 2 keywords + remote (only the most relevant)
+    for kw in keywords[:2]:
         queries.append(f"{kw} remote India")
 
-    # 3. Skill-anchored queries: "React developer Bengaluru"
-    for skill in top_skills[:3]:
-        queries.append(f"{skill} developer {primary_location}")
-
-    # 4. Current title as-is (if short enough)
+    # 3. Current title as-is (if short enough)
     if profile.current_title and len(profile.current_title.split()) <= 4:
         queries.append(f"{profile.current_title} {primary_location}")
 
-    # 5. Generic fallback
-    queries.append(f"software engineer {primary_location}")
-
-    # Deduplicate (case-insensitive) and cap at 15 queries
+    # Deduplicate (case-insensitive) and cap at 8 queries to stay within SerpAPI free tier
     seen = set()
     final = []
     for q in queries:
@@ -71,7 +64,7 @@ def _build_search_queries(profile: CandidateProfile) -> list[str]:
         if q_key not in seen:
             seen.add(q_key)
             final.append(q)
-        if len(final) == 15:
+        if len(final) == 8:
             break
 
     logger.info(f"Generated {len(final)} search queries:")

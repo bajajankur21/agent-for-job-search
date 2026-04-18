@@ -2,8 +2,8 @@ import os
 import logging
 import hashlib
 from typing import Optional
-from pydantic import BaseModel, Field
-from serpapi import GoogleSearch
+import pandas as pd
+from pydantic import BaseModel
 from dotenv import load_dotenv
 from agents.agent_0a_profiler import CandidateProfile
 
@@ -19,7 +19,7 @@ class JobListing(BaseModel):
     description: str
     date_posted: Optional[str] = None
     job_url: Optional[str] = None
-    source: str = "google_jobs"
+    source: str = "jobspy"
 
 
 def _make_job_id(company: str, title: str) -> str:
@@ -27,163 +27,209 @@ def _make_job_id(company: str, title: str) -> str:
     return hashlib.md5(raw.encode()).hexdigest()[:12]
 
 
-def _build_search_queries(profile: CandidateProfile) -> list[str]:
+def _build_search_terms(profile: CandidateProfile) -> list[str]:
     """
-    Generates short, high-yield search queries for Google Jobs.
-
-    Design principle: Google Jobs works best with simple 2-4 word queries.
-    Long, specific queries return zero results. Each query is a concise
-    role title optionally combined with ONE location or skill term.
+    JobSpy expects ONE search_term per scrape call (not Google-style multi-query).
+    Pick the most-yielding seniority-appropriate role titles from the profile.
     """
-    keywords = profile.search_keywords or ["Software Engineer", "Developer"]
-    locations = profile.preferred_locations or ["Bengaluru"]
-    primary_location = locations[0]  # Usually "Bengaluru"
+    keywords = profile.search_keywords or ["Software Engineer", "Backend Engineer"]
+    max_terms = int(os.getenv("JOBSPY_MAX_TERMS", "4"))
 
-    # Top skills for combining with generic titles
-    top_skills = (profile.core_skills + profile.frameworks)[:4]
-
-    queries = []
-
-    # 1. Each search keyword + primary location (most direct)
-    for kw in keywords[:5]:
-        queries.append(f"{kw} {primary_location}")
-
-    # 2. Top 2 keywords + remote (only the most relevant)
-    for kw in keywords[:2]:
-        queries.append(f"{kw} remote India")
-
-    # 3. Current title as-is (if short enough)
-    if profile.current_title and len(profile.current_title.split()) <= 4:
-        queries.append(f"{profile.current_title} {primary_location}")
-
-    # Deduplicate (case-insensitive) and cap at 8 queries to stay within SerpAPI free tier
     seen = set()
-    final = []
-    for q in queries:
-        q_key = q.lower().strip()
-        if q_key not in seen:
-            seen.add(q_key)
-            final.append(q)
-        if len(final) == 8:
+    terms = []
+    for kw in keywords:
+        key = kw.lower().strip()
+        if key in seen:
+            continue
+        seen.add(key)
+        terms.append(kw)
+        if len(terms) >= max_terms:
             break
 
-    logger.info(f"Generated {len(final)} search queries:")
-    for i, q in enumerate(final, 1):
-        logger.info(f"  {i}. {q}")
+    logger.info(f"JobSpy will run {len(terms)} search terms:")
+    for i, t in enumerate(terms, 1):
+        logger.info(f"  {i}. {t}")
+    return terms
 
-    return final
 
-
-def _search_single_query(query: str, serp_api_key: str) -> list[dict]:
+def _scrape_one_term(
+    term: str,
+    location: str,
+    results_per_site: int,
+    hours_old: int,
+    sites: list[str],
+) -> pd.DataFrame:
     """
-    Calls SerpAPI Google Jobs for one query.
-    num=20 is the max results per call on the free tier.
-    chips=date_posted:week returns jobs posted in the last 7 days.
+    Calls JobSpy for one search term. Runs sites separately because
+    LinkedIn only honors `location` while Indeed needs `country_indeed`.
     """
-    params = {
-        "engine": "google_jobs",
-        "q": query,
-        "location": "India",
-        "hl": "en",
-        "gl": "in",
-        "chips": "date_posted:week",
-        "num": "20",
-        "api_key": serp_api_key,
-    }
+    from jobspy import scrape_jobs as jobspy_scrape
 
-    try:
-        search = GoogleSearch(params)
-        results = search.get_dict()
+    frames: list[pd.DataFrame] = []
 
-        # SerpAPI returns an error key if the query fails
-        if "error" in results:
-            logger.error(f"SerpAPI error for query '{query}': {results['error']}")
-            return []
+    if "linkedin" in sites:
+        try:
+            df = jobspy_scrape(
+                site_name=["linkedin"],
+                search_term=term,
+                location=location,
+                results_wanted=results_per_site,
+                hours_old=hours_old,
+                linkedin_fetch_description=True,
+            )
+            logger.info(f"  [linkedin] '{term}' → {len(df)} results")
+            frames.append(df)
+        except Exception as e:
+            logger.error(f"  [linkedin] '{term}' failed: {e}")
 
-        jobs = results.get("jobs_results", [])
-        logger.info(f"  Query '{query[:55]}...' → {len(jobs)} raw results")
-        return jobs
+    if "indeed" in sites:
+        try:
+            df = jobspy_scrape(
+                site_name=["indeed"],
+                search_term=term,
+                location=location,
+                country_indeed="india",
+                results_wanted=results_per_site,
+                hours_old=hours_old,
+            )
+            logger.info(f"  [indeed] '{term}' → {len(df)} results")
+            frames.append(df)
+        except Exception as e:
+            logger.error(f"  [indeed] '{term}' failed: {e}")
 
-    except Exception as e:
-        logger.error(f"SerpAPI call failed for query '{query}': {e}")
-        return []
+    if "glassdoor" in sites:
+        try:
+            df = jobspy_scrape(
+                site_name=["glassdoor"],
+                search_term=term,
+                location=location,
+                country_indeed="india",
+                results_wanted=results_per_site,
+                hours_old=hours_old,
+            )
+            logger.info(f"  [glassdoor] '{term}' → {len(df)} results")
+            frames.append(df)
+        except Exception as e:
+            logger.error(f"  [glassdoor] '{term}' failed: {e}")
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
 
-def scrape_jobs(profile: CandidateProfile, target_raw: int = 150) -> list[JobListing]:
+def _row_to_listing(row: pd.Series) -> Optional[JobListing]:
+    """Map a JobSpy DataFrame row to a JobListing. Returns None on missing essentials."""
+    company = str(row.get("company") or "").strip() or "Unknown Company"
+    title = str(row.get("title") or "").strip()
+    if not title:
+        return None
+
+    location_parts = [
+        str(row.get("city") or "").strip(),
+        str(row.get("state") or "").strip(),
+        str(row.get("country") or "").strip(),
+    ]
+    location = ", ".join(p for p in location_parts if p and p.lower() != "nan")
+    if not location:
+        location = str(row.get("location") or "").strip()
+    if row.get("is_remote") is True:
+        location = (location + " (Remote)").strip() if location else "Remote"
+
+    description = str(row.get("description") or "").strip()
+    if description.lower() == "nan":
+        description = ""
+
+    date_posted = row.get("date_posted")
+    if pd.isna(date_posted):
+        date_posted = None
+    else:
+        date_posted = str(date_posted)
+
+    job_url = row.get("job_url")
+    if pd.isna(job_url):
+        job_url = row.get("job_url_direct")
+    if pd.isna(job_url):
+        job_url = None
+    else:
+        job_url = str(job_url)
+
+    site = str(row.get("site") or "jobspy").strip().lower() or "jobspy"
+
+    return JobListing(
+        job_id=_make_job_id(company, title),
+        title=title,
+        company=company,
+        location=location,
+        description=description,
+        date_posted=date_posted,
+        job_url=job_url,
+        source=site,
+    )
+
+
+def scrape_jobs(profile: CandidateProfile, target_raw: int = 80) -> list[JobListing]:
     """
-    Scrapes Google Jobs across multiple queries.
-    Returns up to target_raw deduplicated raw jobs BEFORE any ranking.
-    Location filter is intentionally loose here — ranker handles precision.
-    
-    Args:
-        profile: Candidate profile built by Agent 0A
-        target_raw: How many raw jobs to collect before stopping (default 150)
-    """
-    serp_api_key = os.getenv("SERP_API_KEY")
-    if not serp_api_key:
-        raise EnvironmentError(
-            "SERP_API_KEY not set. "
-            "Get a free key at serpapi.com and add it to GitHub Secrets."
-        )
+    Scrapes LinkedIn + Indeed (and optionally Glassdoor) via JobSpy.
+    No API key required. Returns up to target_raw deduplicated raw jobs.
 
-    queries = _build_search_queries(profile)
+    Env knobs:
+    - JOBSPY_SITES: comma-separated, default "linkedin,indeed"
+    - JOBSPY_RESULTS_PER_SITE: per-site cap per term, default 25
+    - JOBSPY_HOURS_OLD: recency filter in hours, default 168 (7 days)
+    - JOBSPY_MAX_TERMS: how many search_keywords to use, default 4
+    """
+    sites = [
+        s.strip().lower()
+        for s in os.getenv("JOBSPY_SITES", "linkedin,indeed").split(",")
+        if s.strip()
+    ]
+    results_per_site = int(os.getenv("JOBSPY_RESULTS_PER_SITE", "25"))
+    hours_old = int(os.getenv("JOBSPY_HOURS_OLD", "168"))
+
+    primary_location = (profile.preferred_locations or ["Bengaluru"])[0]
+    terms = _build_search_terms(profile)
+
+    location_terms = [loc.lower() for loc in profile.preferred_locations] + [
+        "remote", "work from home", "hybrid", "india"
+    ]
+
     seen_ids: set[str] = set()
     all_jobs: list[JobListing] = []
 
-    # Preferred locations — used for soft pre-filter only
-    location_terms = [loc.lower() for loc in profile.preferred_locations] + \
-                     ["remote", "work from home", "hybrid", "india"]
-
-    for query in queries:
+    for term in terms:
         if len(all_jobs) >= target_raw:
             logger.info(f"Reached target of {target_raw} raw jobs. Stopping scrape.")
             break
 
-        raw_results = _search_single_query(query, serp_api_key)
+        df = _scrape_one_term(
+            term=term,
+            location=primary_location,
+            results_per_site=results_per_site,
+            hours_old=hours_old,
+            sites=sites,
+        )
+        if df.empty:
+            continue
 
-        for raw in raw_results:
+        for _, row in df.iterrows():
             if len(all_jobs) >= target_raw:
                 break
 
-            company = raw.get("company_name", "Unknown Company")
-            title = raw.get("title", "Unknown Title")
-            job_id = _make_job_id(company, title)
-
-            # Deduplicate
-            if job_id in seen_ids:
+            listing = _row_to_listing(row)
+            if listing is None:
                 continue
-            seen_ids.add(job_id)
+            if listing.job_id in seen_ids:
+                continue
+            seen_ids.add(listing.job_id)
 
-            # Soft location pre-filter — keep anything India-adjacent
-            # Hard location enforcement happens in the ranker
-            location = raw.get("location", "")
-            location_ok = any(term in location.lower() for term in location_terms)
-            if not location_ok:
-                logger.debug(f"Pre-filter drop (location): '{title}' @ '{company}' — '{location}'")
+            if not any(t in listing.location.lower() for t in location_terms):
+                logger.debug(f"Pre-filter drop (location): '{listing.title}' @ '{listing.company}' — '{listing.location}'")
                 continue
 
-            # Build description from all available fields
-            description = raw.get("description", "")
-            if not description:
-                extensions = raw.get("detected_extensions", {})
-                description = " | ".join(f"{k}: {v}" for k, v in extensions.items())
-
-            # Get job URL from related links if available
-            related_links = raw.get("related_links", [])
-            job_url = related_links[0].get("link") if related_links else None
-
-            all_jobs.append(JobListing(
-                job_id=job_id,
-                title=title,
-                company=company,
-                location=location,
-                description=description,
-                date_posted=raw.get("detected_extensions", {}).get("posted_at"),
-                job_url=job_url,
-            ))
+            all_jobs.append(listing)
 
     logger.info(
         f"Scraper complete: {len(all_jobs)} unique jobs collected "
-        f"from {len(queries)} queries (target was {target_raw})"
+        f"from {len(terms)} search terms across {sites} (target was {target_raw})"
     )
-    return all_jobs 
+    return all_jobs

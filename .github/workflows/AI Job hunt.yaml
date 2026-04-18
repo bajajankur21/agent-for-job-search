@@ -35,11 +35,20 @@ jobs:
 
       - name: Run pipeline
         env:
+          # ── Required secrets ──
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
           AWS_S3_BUCKET: ${{ secrets.AWS_S3_BUCKET }}
           AWS_REGION: ${{ secrets.AWS_REGION }}
+          # ── JobSpy knobs (repo Variables, not Secrets — empty string is fine) ──
+          JOBSPY_SITES: ${{ vars.JOBSPY_SITES }}
+          JOBSPY_RESULTS_PER_SITE: ${{ vars.JOBSPY_RESULTS_PER_SITE }}
+          JOBSPY_HOURS_OLD: ${{ vars.JOBSPY_HOURS_OLD }}
+          JOBSPY_MAX_TERMS: ${{ vars.JOBSPY_MAX_TERMS }}
+          # ── Per-purpose model overrides (repo Variables) ──
+          MODEL_PROFILER: ${{ vars.MODEL_PROFILER }}
+          MODEL_TAILORING: ${{ vars.MODEL_TAILORING }}
+          MODEL_SCORER: ${{ vars.MODEL_SCORER }}
         run: python main.py
 
 #  cleanup:

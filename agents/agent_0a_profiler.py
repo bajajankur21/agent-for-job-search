@@ -83,7 +83,7 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 
 
 PROFILE_EXTRACTION_PROMPT = """
-You are an expert technical recruiter. Extract a structured candidate profile from the resume text below.
+You are an expert technical recruiter. Extract a structured candidate profile from the resume text below by calling the `extract_candidate_profile` tool.
 
 Today's date is: {today_date}
 
@@ -97,36 +97,47 @@ Rules:
 - For preferred_locations: default to ["Bengaluru", "Remote"] unless other locations are stated.
 - For max_yoe_applying_for: set to total_yoe + 1, capped at 5.
 
-Return ONLY a valid JSON object matching this exact schema. No markdown, no explanation, no code fences.
-
-Schema:
-{{
-  "full_name": string,
-  "current_title": string,
-  "total_yoe": float,
-  "core_skills": [string],
-  "frameworks": [string],
-  "domains": [string],
-  "seniority": "junior" | "mid" | "senior" | "staff",
-  "companies": [string],
-  "education": string | null,
-  "email": string | null,
-  "phone": string | null,
-  "linkedin": string | null,
-  "github": string | null,
-  "location_city": string | null,
-  "preferred_locations": [string],
-  "company_type_preference": "product" | "service" | "both",
-  "max_yoe_applying_for": integer,
-  "search_keywords": [string],
-  "raw_summary": "one paragraph professional summary"
-}}
-
 Resume text:
 ---
 {resume_text}
 ---
 """
+
+# Tool schema for Claude — forces the model to return structured data matching CandidateProfile.
+# This eliminates fragile JSON parsing entirely.
+PROFILE_EXTRACTION_TOOL = {
+    "name": "extract_candidate_profile",
+    "description": "Extract a structured candidate profile from a resume. Always call this tool with all fields populated.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "full_name": {"type": "string"},
+            "current_title": {"type": "string"},
+            "total_yoe": {"type": "number", "description": "Total years of experience including internships, rounded to nearest 0.5"},
+            "core_skills": {"type": "array", "items": {"type": "string"}},
+            "frameworks": {"type": "array", "items": {"type": "string"}},
+            "domains": {"type": "array", "items": {"type": "string"}},
+            "seniority": {"type": "string", "enum": ["junior", "mid", "senior", "staff"]},
+            "companies": {"type": "array", "items": {"type": "string"}},
+            "education": {"type": ["string", "null"]},
+            "email": {"type": ["string", "null"]},
+            "phone": {"type": ["string", "null"]},
+            "linkedin": {"type": ["string", "null"]},
+            "github": {"type": ["string", "null"]},
+            "location_city": {"type": ["string", "null"]},
+            "preferred_locations": {"type": "array", "items": {"type": "string"}},
+            "company_type_preference": {"type": "string", "enum": ["product", "service", "both"]},
+            "max_yoe_applying_for": {"type": "integer"},
+            "search_keywords": {"type": "array", "items": {"type": "string"}, "minItems": 8, "maxItems": 12},
+            "raw_summary": {"type": "string", "description": "One paragraph professional summary"},
+        },
+        "required": [
+            "full_name", "current_title", "total_yoe", "core_skills", "frameworks",
+            "domains", "seniority", "companies", "preferred_locations",
+            "company_type_preference", "max_yoe_applying_for", "search_keywords", "raw_summary"
+        ],
+    },
+}
 
 
 def build_candidate_profile(resume_pdf_path: str) -> CandidateProfile:
@@ -144,26 +155,26 @@ def build_candidate_profile(resume_pdf_path: str) -> CandidateProfile:
     today_date = date.today().strftime("%B %d, %Y")
     prompt = PROFILE_EXTRACTION_PROMPT.format(resume_text=resume_text, today_date=today_date)
 
-    logger.info("Building candidate profile with Claude...")
+    model = os.getenv("MODEL_PROFILER", "claude-sonnet-4-5-20250929")
+    logger.info(f"Building candidate profile with {model} (tool-use mode)...")
     response = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}]
+        model=model,
+        max_tokens=2048,
+        tools=[PROFILE_EXTRACTION_TOOL],
+        tool_choice={"type": "tool", "name": "extract_candidate_profile"},
+        messages=[{"role": "user", "content": prompt}],
     )
 
-    raw = response.content[0].text.strip()
-
-    # Strip markdown fences if present
-    if raw.startswith("```"):
-        lines = raw.split("\n")
-        raw = "\n".join(lines[1:-1])
+    # Tool use response — Claude returns the extracted data as a structured dict, no JSON parsing needed.
+    tool_use_block = next((b for b in response.content if b.type == "tool_use"), None)
+    if tool_use_block is None:
+        raise ValueError(f"Claude did not return a tool_use block. Got: {response.content}")
 
     try:
-        data = json.loads(raw)
-        profile = CandidateProfile(**data)
+        profile = CandidateProfile(**tool_use_block.input)
     except Exception as e:
-        logger.error(f"Profile extraction failed: {e}\nRaw response: {raw}")
-        raise ValueError(f"Could not parse candidate profile: {e}")
+        logger.error(f"Profile validation failed: {e}\nInput: {tool_use_block.input}")
+        raise ValueError(f"Could not validate candidate profile: {e}")
 
     logger.info(
         f"Profile built: {profile.full_name} | "

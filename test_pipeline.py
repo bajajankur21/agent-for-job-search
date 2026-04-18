@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 
 import PyPDF2
 
-from agents.agent_0a_profiler import build_candidate_profile
+from agents.agent_0a_profiler import build_candidate_profile, extract_text_from_pdf
 from agents.agent_0b_scraper import scrape_jobs
 from agents.agent_0c_ranker import rank_and_filter_jobs
 from agents.agent_1 import run_tailor
@@ -59,7 +59,7 @@ ALL_AGENTS = ["agent_0a", "agent_0b", "agent_0c", "agent_1", "agent_2"]
 # Defaults: mock expensive/infra agents, live the free ones, gemini for Claude
 DEFAULT_MODES = {
     "agent_0a": "mock",    # Claude Sonnet — expensive
-    "agent_0b": "live",    # SerpAPI — free tier
+    "agent_0b": "live",    # JobSpy — free local scraping
     "agent_0c": "live",    # Gemini Flash Lite — free tier
     "agent_1":  "gemini",  # Claude Sonnet → Gemini override
     "agent_2":  "mock",    # AWS S3 — needs credentials
@@ -114,17 +114,6 @@ def build_mode_config(args) -> dict[str, str]:
     return modes
 
 
-def extract_resume_text(pdf_path: Path) -> str:
-    text_parts = []
-    with open(pdf_path, "rb") as f:
-        reader = PyPDF2.PdfReader(f)
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                text_parts.append(text)
-    return "\n".join(text_parts)
-
-
 def main():
     args = parse_args()
     modes = build_mode_config(args)
@@ -152,18 +141,18 @@ def main():
 
     master_resume_text = ""
     if modes["agent_1"] != "mock" and RESUME_PDF_PATH.exists():
-        master_resume_text = extract_resume_text(RESUME_PDF_PATH)
+        master_resume_text = extract_text_from_pdf(str(RESUME_PDF_PATH))
 
     # ── Agent 0B: Scraper ─────────────────────────────────────────────
     if modes["agent_0b"] == "mock":
         logger.info("[AGENT 0B] Using mock jobs")
         raw_jobs = mock_agent_0b()
     else:
-        logger.info("[AGENT 0B] Scraping jobs via SerpAPI (live)")
+        logger.info("[AGENT 0B] Scraping jobs via JobSpy (live)")
         raw_jobs = scrape_jobs(profile, target_raw=80)
 
     if not raw_jobs:
-        logger.warning("No jobs found. Check SerpAPI key and search queries.")
+        logger.warning("No jobs found. Check JobSpy configuration and search queries.")
         sys.exit(0)
 
     logger.info(f"Scraper: {len(raw_jobs)} jobs. Sample:")

@@ -33,8 +33,20 @@ jobs:
 
       - name: Run test pipeline
         env:
+          # ── Required secrets ──
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SERP_API_KEY: ${{ secrets.SERP_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # ── JobSpy knobs (repo Variables) ──
+          JOBSPY_SITES: ${{ vars.JOBSPY_SITES }}
+          JOBSPY_RESULTS_PER_SITE: ${{ vars.JOBSPY_RESULTS_PER_SITE }}
+          JOBSPY_HOURS_OLD: ${{ vars.JOBSPY_HOURS_OLD }}
+          JOBSPY_MAX_TERMS: ${{ vars.JOBSPY_MAX_TERMS }}
+          # ── Per-purpose model overrides (repo Variables) ──
+          MODEL_PROFILER: ${{ vars.MODEL_PROFILER }}
+          MODEL_TAILORING: ${{ vars.MODEL_TAILORING }}
+          MODEL_SCORER: ${{ vars.MODEL_SCORER }}
+          MODEL_PROFILER_GEMINI: ${{ vars.MODEL_PROFILER_GEMINI }}
+          MODEL_TAILORING_GEMINI: ${{ vars.MODEL_TAILORING_GEMINI }}
         run: |
           if [ "${{ inputs.mode }}" = "gemini-only" ]; then
             python test_pipeline.py --gemini-only --max-jobs 5

@@ -24,15 +24,16 @@ from agents.agent_1 import TailoredAssets, SYSTEM_PROMPT
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-GEMINI_MODEL = "gemini-2.5-flash-lite"
+DEFAULT_GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 
-def _get_gemini_model() -> genai.GenerativeModel:
+def _get_gemini_model(env_var: str = "GEMINI_MODEL") -> genai.GenerativeModel:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise EnvironmentError("GEMINI_API_KEY not set")
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel(GEMINI_MODEL)
+    model_name = os.getenv(env_var, DEFAULT_GEMINI_MODEL)
+    return genai.GenerativeModel(model_name)
 
 
 def _extract_json(raw: str, array: bool = False) -> str:
@@ -56,23 +57,26 @@ def build_candidate_profile_gemini(resume_pdf_path: str) -> CandidateProfile:
     logger.info(f"Extracted {len(resume_text)} characters from PDF")
 
     from datetime import date
-    model = _get_gemini_model()
+    model = _get_gemini_model("MODEL_PROFILER_GEMINI")
     today_date = date.today().strftime("%B %d, %Y")
     prompt = PROFILE_EXTRACTION_PROMPT.format(resume_text=resume_text, today_date=today_date)
 
-    logger.info("[GEMINI OVERRIDE] Building candidate profile with Gemini Flash...")
+    logger.info("[GEMINI OVERRIDE] Building candidate profile with Gemini Flash (structured output)...")
     response = model.generate_content(
         prompt,
-        generation_config=genai.GenerationConfig(temperature=0.0, max_output_tokens=4096),
+        generation_config=genai.GenerationConfig(
+            temperature=0.0,
+            max_output_tokens=4096,
+            response_mime_type="application/json",
+            response_schema=CandidateProfile,
+        ),
     )
 
-    raw = _extract_json(response.text)
-
     try:
-        data = json.loads(raw)
+        data = json.loads(response.text)
         profile = CandidateProfile(**data)
     except Exception as e:
-        logger.error(f"Profile extraction failed: {e}\nRaw response: {raw}")
+        logger.error(f"Profile extraction failed: {e}\nRaw response: {response.text[:500]}")
         raise ValueError(f"Could not parse candidate profile: {e}")
 
     logger.info(
@@ -90,8 +94,8 @@ def run_tailor_gemini(
     profile: CandidateProfile,
     master_resume_text: str,
 ) -> TailoredAssets:
-    """Same as agent_1.run_tailor but uses Gemini Flash instead of Claude Sonnet."""
-    model = _get_gemini_model()
+    """Same as agent_1.run_tailor but uses Gemini Flash with native structured output."""
+    model = _get_gemini_model("MODEL_TAILORING_GEMINI")
 
     user_prompt = f"""{SYSTEM_PROMPT}
 
@@ -112,62 +116,21 @@ Job Description:
 My candidate profile summary: {profile.raw_summary}
 Total years of experience: {profile.total_yoe}
 
-Produce a complete tailored resume and application materials as a single JSON object.
-No markdown, no explanation — raw JSON only.
+Produce a complete tailored resume and application materials.
 
 Rules:
 - CRITICAL: The candidate has exactly {profile.total_yoe} years of experience. Always use this exact number. Do NOT calculate, estimate, or round YOE from resume dates — use {profile.total_yoe} as-is.
 - Copy all experience entries and projects EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any.
 - For each experience entry, write 3-5 achievement bullets reframed toward this specific JD. Use action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
-- The summary must be 2-3 sentences positioning me for THIS specific role.
-- Skills: group into 3-4 categories (e.g. Languages, Frameworks, Tools & Cloud, Databases). Include all skills from master resume; highlight those relevant to JD first.
-- Projects: include all projects from master resume. Write 1-2 bullets per project emphasising relevance to this JD.
-- Education: single line in format "Degree | Institution | Graduation Year".
-
-Required JSON schema:
-{{
-  "summary": "WRITE a 2-3 sentence professional summary positioning the candidate for this specific role. Do NOT include the words 'tailored to' or 'tailored for'.",
-  "experience": [
-    {{
-      "company": "Company name from resume",
-      "title": "Job title from resume",
-      "dates": "Date range from resume e.g. Jan 2023 – Present",
-      "location": "City, Country",
-      "bullets": [
-        "Achievement bullet 1 reframed toward this JD",
-        "Achievement bullet 2",
-        "Achievement bullet 3"
-      ]
-    }}
-  ],
-  "skills": {{
-    "Languages": ["Python", "Java"],
-    "Frameworks": ["React", "FastAPI"],
-    "Tools & Cloud": ["AWS", "Docker", "Git"]
-  }},
-  "projects": [
-    {{
-      "name": "Project name from resume",
-      "tech_stack": "comma-separated tech stack",
-      "bullets": ["What it does and its impact, framed for this JD"]
-    }}
-  ],
-  "education": "Degree | Institution | Year",
-  "cover_letter": "Full 3-paragraph cover letter. Para 1: why this role and company specifically. Para 2: 2-3 concrete experiences mapped to their requirements. Para 3: closing with specific value proposition.",
-  "form_answers": {{
-    "describe_last_role": "2-3 sentences about most recent role relevant to this JD",
-    "describe_second_last_role": "2-3 sentences about second most recent role relevant to this JD",
-    "why_this_company": "2 sentences specific to this company",
-    "biggest_achievement": "One STAR-format achievement most relevant to this JD",
-    "notice_period": "Immediate to 30 days",
-    "expected_ctc": "Open to discussion based on role scope"
-  }},
-  "job_title_used": "the exact job title from the listing above",
-  "company_name_used": "the exact company name from the listing above"
-}}
+- summary: 2-3 sentences positioning me for THIS specific role. Do NOT include the words 'tailored to' or 'tailored for'.
+- skills: group into 3-4 categories (e.g. Languages, Frameworks, Tools & Cloud, Databases). Include all skills from master resume; highlight those relevant to JD first.
+- projects: include all projects from master resume. Write 1-2 bullets per project emphasising relevance to this JD.
+- education: single line in format "Degree | Institution | Graduation Year".
+- form_answers: include describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc.
+- job_title_used and company_name_used: use the exact values from the listing above.
 """
 
-    logger.info(f"[GEMINI OVERRIDE] Calling Gemini for tailoring: '{job.title}' @ {job.company}")
+    logger.info(f"[GEMINI OVERRIDE] Calling Gemini for tailoring: '{job.title}' @ {job.company} (structured output)")
 
     import time
     from google.api_core.exceptions import ResourceExhausted
@@ -176,7 +139,12 @@ Required JSON schema:
         try:
             response = model.generate_content(
                 user_prompt,
-                generation_config=genai.GenerationConfig(temperature=0.3, max_output_tokens=8192),
+                generation_config=genai.GenerationConfig(
+                    temperature=0.3,
+                    max_output_tokens=8192,
+                    response_mime_type="application/json",
+                    response_schema=TailoredAssets,
+                ),
             )
             break
         except ResourceExhausted:
@@ -186,10 +154,8 @@ Required JSON schema:
             logger.warning(f"Rate limit hit, retrying in {wait}s... (attempt {attempt + 1}/3)")
             time.sleep(wait)
 
-    raw = _extract_json(response.text)
-
     try:
-        data = json.loads(raw)
+        data = json.loads(response.text)
         return TailoredAssets(**data)
     except Exception as e:
-        raise ValueError(f"Gemini tailor JSON parse failed for '{job.title}': {e}\nRaw: {raw[:500]}")
+        raise ValueError(f"Gemini tailor parse failed for '{job.title}': {e}\nRaw: {response.text[:500]}")

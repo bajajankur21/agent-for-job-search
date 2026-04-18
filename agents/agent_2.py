@@ -5,11 +5,11 @@ import boto3
 from datetime import datetime
 from io import BytesIO
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
-from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+from reportlab.platypus import SimpleDocTemplate, Paragraph, HRFlowable
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 from dotenv import load_dotenv
 from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
@@ -204,45 +204,6 @@ def _build_resume_pdf(assets: TailoredAssets, profile: CandidateProfile) -> byte
     return buffer.getvalue()
 
 
-def _build_cover_letter_pdf(assets: TailoredAssets, profile: CandidateProfile) -> bytes:
-    """Generates a professional cover letter PDF."""
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=25 * mm,
-        leftMargin=25 * mm,
-        topMargin=25 * mm,
-        bottomMargin=25 * mm,
-    )
-
-    styles = getSampleStyleSheet()
-    header_style = ParagraphStyle(
-        "Header", parent=styles["Normal"],
-        fontSize=11, spaceAfter=16,
-    )
-    body_style = ParagraphStyle(
-        "Body", parent=styles["Normal"],
-        fontSize=10.5, leading=16, spaceAfter=12,
-        alignment=TA_JUSTIFY,
-    )
-
-    today = datetime.now().strftime("%B %d, %Y")
-    story = []
-    story.append(Paragraph(f"{_escape(profile.full_name)}<br/>{today}", header_style))
-    story.append(Paragraph(
-        f"Hiring Manager<br/>{_escape(assets.company_name_used)}", header_style
-    ))
-    story.append(Spacer(1, 4 * mm))
-
-    for para in assets.cover_letter.split("\n\n"):
-        if para.strip():
-            story.append(Paragraph(_escape(para.strip()), body_style))
-
-    doc.build(story)
-    return buffer.getvalue()
-
-
 def publish_to_s3(
     job: JobListing,
     assets: TailoredAssets,
@@ -250,7 +211,7 @@ def publish_to_s3(
     score: int = 0,
 ) -> dict[str, str]:
     """
-    Uploads 4 files to S3. Returns dict of {asset_type: s3_key}.
+    Uploads 3 files to S3. Returns dict of {asset_type: s3_key}.
     S3 key structure: YYYY-MM-DD/CompanyName_RoleTitle/filename
     """
     bucket_name = os.getenv("AWS_S3_BUCKET")
@@ -277,19 +238,7 @@ def publish_to_s3(
     uploads["resume"] = resume_key
     logger.info(f"Uploaded resume: {resume_key}")
 
-    # 2. Cover letter PDF
-    cover_bytes = _build_cover_letter_pdf(assets, profile)
-    cover_key = f"{folder}/cover_letter.pdf"
-    s3.put_object(
-        Bucket=bucket_name,
-        Key=cover_key,
-        Body=cover_bytes,
-        ContentType="application/pdf",
-    )
-    uploads["cover_letter"] = cover_key
-    logger.info(f"Uploaded cover letter: {cover_key}")
-
-    # 3. Form answers JSON
+    # 2. Form answers JSON
     form_key = f"{folder}/form_answers.json"
     s3.put_object(
         Bucket=bucket_name,
@@ -300,7 +249,7 @@ def publish_to_s3(
     uploads["form_answers"] = form_key
     logger.info(f"Uploaded form answers: {form_key}")
 
-    # 4. Job metadata — id, apply link, score for easy tracking
+    # 3. Job metadata — id, apply link, score for easy tracking
     job_info = {
         "job_id": job.job_id,
         "title": job.title,

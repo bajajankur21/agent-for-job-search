@@ -135,7 +135,7 @@ def mock_agent_1(job: JobListing) -> TailoredAssets:
         projects=[
             ProjectEntry(
                 name="Job Application Automation Agent",
-                tech_stack="Python, Claude AI, Gemini, SerpAPI, AWS S3",
+                tech_stack="Python, Claude AI, Gemini, JobSpy, AWS S3",
                 bullets=[
                     "Built a multi-agent pipeline that scrapes, ranks, and tailors job applications autonomously",
                     "Reduced manual application time from 2 hours to zero per day",
@@ -143,16 +143,6 @@ def mock_agent_1(job: JobListing) -> TailoredAssets:
             ),
         ],
         education="B.Tech Computer Science | BITS Pilani | 2023",
-        cover_letter=(
-            f"I am excited to apply for the {job.title} position at {job.company}. "
-            "Your engineering culture and focus on scalable products aligns with my background "
-            "in building high-throughput backend systems.\n\n"
-            "In my current role at Infosys BPM, I built REST APIs serving 10K+ requests/day "
-            "using Python and FastAPI, deployed microservices on AWS ECS, and reduced API latency "
-            "by 40% through caching — directly applicable to your requirements.\n\n"
-            f"I am confident I can contribute meaningfully to {job.company}'s engineering team "
-            "from day one. I look forward to discussing how my experience maps to your needs."
-        ),
         form_answers={
             "describe_last_role": "Built backend APIs and React frontends at Infosys BPM.",
             "describe_second_last_role": "Delivered full-stack client projects as a freelance developer.",
@@ -170,7 +160,6 @@ def mock_agent_2(job: JobListing) -> dict[str, str]:
     """Mock publisher — returns fake S3 keys."""
     return {
         "resume": f"2026-01-01/{job.company}_{job.title}/resume.pdf",
-        "cover_letter": f"2026-01-01/{job.company}_{job.title}/cover_letter.pdf",
         "form_answers": f"2026-01-01/{job.company}_{job.title}/form_answers.json",
         "job_info": f"2026-01-01/{job.company}_{job.title}/job_info.json",
     }

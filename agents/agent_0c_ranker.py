@@ -2,10 +2,18 @@ import os
 import re
 import json
 import logging
+from pydantic import BaseModel, Field
 from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
 import google.generativeai as genai
 from dotenv import load_dotenv
+
+
+class _JobScore(BaseModel):
+    """One scored job — used as the Gemini response schema."""
+    job_id: str
+    score: int = Field(ge=0, le=100)
+    reason: str = Field(max_length=80)
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -203,7 +211,8 @@ def _gemini_batch_score(
         raise EnvironmentError("GEMINI_API_KEY not set")
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-2.5-flash-lite")
+    model_name = os.getenv("MODEL_SCORER", "gemini-2.5-flash-lite")
+    model = genai.GenerativeModel(model_name)
 
     # Build compact job representations — enough for scoring, not full JD
     jobs_for_scoring = [
@@ -228,35 +237,31 @@ def _gemini_batch_score(
         jobs_json=json.dumps(jobs_for_scoring, indent=2)
     )
 
-    logger.info(f"Sending {len(jobs)} jobs to Gemini Flash for batch scoring...")
+    logger.info(f"Sending {len(jobs)} jobs to {model_name} for batch scoring (structured output)...")
 
+    # response_schema=list[_JobScore] forces Gemini to return a valid JSON array
+    # matching the schema — no markdown, no thinking preamble, no parsing hacks.
     response = model.generate_content(
         prompt,
         generation_config=genai.GenerationConfig(
             temperature=0.0,
-            max_output_tokens=6144,  # ~20 tokens per job × 100 jobs + buffer for larger descriptions
+            max_output_tokens=6144,
+            response_mime_type="application/json",
+            response_schema=list[_JobScore],
         )
     )
 
-    raw = response.text.strip()
-    # Gemini 2.5 Flash may prepend thinking tokens — extract the JSON array directly
-    start = raw.find('[')
-    end = raw.rfind(']')
-    if start != -1 and end > start:
-        raw = raw[start:end + 1]
-
     try:
-        scored_list = json.loads(raw)
+        scored_list = json.loads(response.text)
     except json.JSONDecodeError as e:
-        logger.error(f"Gemini batch scoring parse failed: {e}\nRaw: {raw[:500]}")
-        # Graceful degradation: return score 50 for all jobs so pipeline continues
+        logger.error(f"Gemini batch scoring parse failed: {e}\nRaw: {response.text[:500]}")
         return {job.job_id: (50, "parse failed — default score") for job in jobs}
 
     scores: dict[str, tuple[int, str]] = {}
     for item in scored_list:
         try:
             scores[item["job_id"]] = (int(item["score"]), item.get("reason", ""))
-        except (KeyError, ValueError):
+        except (KeyError, ValueError, TypeError):
             continue
 
     logger.info(f"Gemini scored {len(scores)}/{len(jobs)} jobs successfully")

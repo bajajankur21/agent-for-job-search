@@ -63,13 +63,10 @@ def _save_seen_ids(s3_client, bucket: str, seen_ids: set[str]) -> None:
         logger.warning(f"Could not save seen-jobs state: {e}")
 
 
-def _filter_seen(
-    ranked_jobs: list[tuple[JobListing, int]],
-    seen_ids: set[str],
-) -> list[tuple[JobListing, int]]:
+def _filter_seen(jobs: list[JobListing], seen_ids: set[str]) -> list[JobListing]:
     """Removes jobs that have already been processed in a previous run."""
-    fresh = [(job, score) for job, score in ranked_jobs if job.job_id not in seen_ids]
-    skipped = len(ranked_jobs) - len(fresh)
+    fresh = [job for job in jobs if job.job_id not in seen_ids]
+    skipped = len(jobs) - len(fresh)
     if skipped:
         logger.info(f"Dedup: skipped {skipped} already-processed jobs, {len(fresh)} new")
     return fresh
@@ -114,12 +111,23 @@ def main():
     logger.info(f"Resume text extracted: {len(master_resume_text)} characters")
 
     # ── Agent 0B: Scrape jobs ─────────────────────────────────────────
-    logger.info("\n[AGENT 0B] Scraping jobs from Google Jobs via SerpAPI...")
+    logger.info("\n[AGENT 0B] Scraping jobs via JobSpy (LinkedIn + Indeed)...")
     raw_jobs = scrape_jobs(profile, target_raw=80)
 
     if not raw_jobs:
         logger.warning("No jobs found. Pipeline complete (nothing to process).")
         sys.exit(0)
+
+    # ── Dedup: drop seen jobs BEFORE the ranker so we don't waste tokens
+    #     scoring listings we've already processed in earlier runs. ────
+    seen_ids = _load_seen_ids(s3_client, bucket_name)
+    raw_jobs = _filter_seen(raw_jobs, seen_ids)
+
+    if not raw_jobs:
+        logger.info("All scraped jobs were already processed in earlier runs. Nothing new.")
+        sys.exit(0)
+
+    logger.info(f"{len(raw_jobs)} fresh jobs to rank...")
 
     # ── Agent 0C: Rank and filter ─────────────────────────────────────
     logger.info("\n[AGENT 0C] Ranking and filtering jobs...")
@@ -129,15 +137,7 @@ def main():
         logger.warning("No jobs passed the ranking threshold.")
         sys.exit(0)
 
-    # ── Dedup: skip jobs already processed in a previous run ─────────
-    seen_ids = _load_seen_ids(s3_client, bucket_name)
-    ranked_jobs = _filter_seen(ranked_jobs, seen_ids)
-
-    if not ranked_jobs:
-        logger.info("All ranked jobs were already processed. Nothing new to apply to.")
-        sys.exit(0)
-
-    logger.info(f"{len(ranked_jobs)} new jobs to process...")
+    logger.info(f"{len(ranked_jobs)} ranked jobs to tailor...")
 
     # ── Process each job: Agent 1 → Agent 2 ──────────────────────────
     results_summary = []

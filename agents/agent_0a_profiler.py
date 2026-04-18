@@ -39,7 +39,7 @@ class CandidateProfile(BaseModel):
         description="product / service / both"
     )
     max_yoe_applying_for: int = Field(
-        default=3,
+        default=4,
         description="Kill switch threshold. Don't apply to jobs requiring more than this."
     )
     search_keywords: list[str] = Field(
@@ -85,15 +85,17 @@ def extract_text_from_pdf(pdf_path: str) -> str:
 PROFILE_EXTRACTION_PROMPT = """
 You are an expert technical recruiter. Extract a structured candidate profile from the resume text below.
 
+Today's date is: {today_date}
+
 Rules:
 - Work with whatever information is present. Do not require specific sections or formats.
 - If a field cannot be determined, use a sensible default — never omit a field.
-- For total_yoe: calculate from work history dates if present, otherwise estimate from seniority signals.
+- For total_yoe: calculate from work history dates. "Present" means today ({today_date}). Include ALL roles — full-time AND internships — in the total. Round to nearest 0.5.
 - For seniority: infer from titles, YOE, and scope of responsibilities.
 - For search_keywords: generate 8-12 SHORT job title keywords (1-3 words each) for Google Jobs search. These will be used directly as search queries, so make them seniority-appropriate. For junior/entry-level candidates, include role variants like "Junior Developer", "SDE 1", "Associate Engineer", "Graduate Engineer". For mid-level, include both plain and "SDE II" style. For senior, include "Senior", "Lead". Always include plain role titles (e.g. "Backend Engineer") alongside seniority-qualified ones. Each keyword must work as a standalone search term.
 - For company_type_preference: always set to "product" unless the resume strongly signals service/consulting background.
 - For preferred_locations: default to ["Bengaluru", "Remote"] unless other locations are stated.
-- For max_yoe_applying_for: set to total_yoe + 1, capped at 4.
+- For max_yoe_applying_for: set to total_yoe + 1, capped at 5.
 
 Return ONLY a valid JSON object matching this exact schema. No markdown, no explanation, no code fences.
 
@@ -138,7 +140,9 @@ def build_candidate_profile(resume_pdf_path: str) -> CandidateProfile:
 
     client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-    prompt = PROFILE_EXTRACTION_PROMPT.format(resume_text=resume_text)
+    from datetime import date
+    today_date = date.today().strftime("%B %d, %Y")
+    prompt = PROFILE_EXTRACTION_PROMPT.format(resume_text=resume_text, today_date=today_date)
 
     logger.info("Building candidate profile with Claude...")
     response = client.messages.create(

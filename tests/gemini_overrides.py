@@ -55,8 +55,10 @@ def build_candidate_profile_gemini(resume_pdf_path: str) -> CandidateProfile:
     resume_text = extract_text_from_pdf(resume_pdf_path)
     logger.info(f"Extracted {len(resume_text)} characters from PDF")
 
+    from datetime import date
     model = _get_gemini_model()
-    prompt = PROFILE_EXTRACTION_PROMPT.format(resume_text=resume_text)
+    today_date = date.today().strftime("%B %d, %Y")
+    prompt = PROFILE_EXTRACTION_PROMPT.format(resume_text=resume_text, today_date=today_date)
 
     logger.info("[GEMINI OVERRIDE] Building candidate profile with Gemini Flash...")
     response = model.generate_content(

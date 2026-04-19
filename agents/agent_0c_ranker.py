@@ -2,7 +2,7 @@ import os
 import re
 import json
 import logging
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
 import google.generativeai as genai
@@ -10,10 +10,12 @@ from dotenv import load_dotenv
 
 
 class _JobScore(BaseModel):
-    """One scored job — used as the Gemini response schema."""
+    """One scored job — used as the Gemini response schema.
+    Constraints (0-100 score, 80-char reason) live in the prompt;
+    Gemini's Schema proto rejects `minimum`/`maximum`/`maxLength`."""
     job_id: str
-    score: int = Field(ge=0, le=100)
-    reason: str = Field(max_length=80)
+    score: int
+    reason: str
 
 load_dotenv()
 logger = logging.getLogger(__name__)

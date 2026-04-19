@@ -211,7 +211,7 @@ def _gemini_batch_score(
         raise EnvironmentError("GEMINI_API_KEY not set")
 
     genai.configure(api_key=api_key)
-    model_name = os.getenv("MODEL_SCORER", "gemini-2.5-flash-lite")
+    model_name = os.getenv("MODEL_SCORER") or "gemini-2.5-flash-lite"
     model = genai.GenerativeModel(model_name)
 
     # Build compact job representations — enough for scoring, not full JD

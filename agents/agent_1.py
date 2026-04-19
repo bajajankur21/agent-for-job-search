@@ -163,7 +163,7 @@ Rules:
 - Education: single line in format "Degree | Institution | Graduation Year".
 """
 
-    model = os.getenv("MODEL_TAILORING", "claude-sonnet-4-5-20250929")
+    model = os.getenv("MODEL_TAILORING") or "claude-sonnet-4-5-20250929"
     logger.info(f"Calling {model} for tailoring: '{job.title}' @ {job.company} (tool-use mode)")
 
     response = client.messages.create(

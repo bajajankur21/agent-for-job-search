@@ -155,7 +155,7 @@ def build_candidate_profile(resume_pdf_path: str) -> CandidateProfile:
     today_date = date.today().strftime("%B %d, %Y")
     prompt = PROFILE_EXTRACTION_PROMPT.format(resume_text=resume_text, today_date=today_date)
 
-    model = os.getenv("MODEL_PROFILER", "claude-sonnet-4-5-20250929")
+    model = os.getenv("MODEL_PROFILER") or "claude-sonnet-4-5-20250929"
     logger.info(f"Building candidate profile with {model} (tool-use mode)...")
     response = client.messages.create(
         model=model,

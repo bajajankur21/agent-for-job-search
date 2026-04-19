@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError
 from agents.agent_0a_profiler import build_candidate_profile
 from agents.agent_0b_scraper import scrape_jobs, JobListing
 from agents.agent_0c_ranker import rank_and_filter_jobs
-from agents.agent_1 import run_tailor
+from agents.agent_1 import run_tailor, run_tailor_gemini
 from agents.agent_2 import publish_to_s3
 
 load_dotenv()
@@ -140,14 +140,21 @@ def main():
     logger.info(f"{len(ranked_jobs)} ranked jobs to tailor...")
 
     # ── Process each job: Agent 1 → Agent 2 ──────────────────────────
+    # Tiered tailoring: top N jobs use Claude Sonnet (highest quality),
+    # the remaining long tail uses Gemini Flash (free tier, ~1500 RPD).
     results_summary = []
+    top_tier_count = int(os.getenv("TOP_TIER_CLAUDE_COUNT", "6"))
 
-    for job, score in ranked_jobs:
+    for i, (job, score) in enumerate(ranked_jobs):
+        use_claude = i < top_tier_count
+        tier = "CLAUDE" if use_claude else "GEMINI"
+
         logger.info(f"\n{'─' * 50}")
-        logger.info(f"Processing: {job.title} @ {job.company} (score: {score}/100)")
+        logger.info(f"[{tier}] Processing: {job.title} @ {job.company} (score: {score}/100)")
 
         try:
-            tailored = run_tailor(job, profile, master_resume_text)
+            tailor_fn = run_tailor if use_claude else run_tailor_gemini
+            tailored = tailor_fn(job, profile, master_resume_text)
             uploads = publish_to_s3(job, tailored, profile, score)
 
             # Mark as processed immediately — even if later jobs fail this one is done

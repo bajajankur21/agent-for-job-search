@@ -207,3 +207,86 @@ Rules:
     except Exception as e:
         logger.error(f"Tailor validation failed for '{job.title}': {e}\nInput: {tool_use_block.input}")
         raise ValueError(f"Could not validate tailored assets for '{job.title}': {e}")
+
+
+# ── Gemini Flash tier for long-tail jobs ─────────────────────────────────────
+# Top-scored jobs go through run_tailor (Claude Sonnet, cached master resume).
+# Lower-scored jobs go through run_tailor_gemini (free tier, ~1500 RPD on Flash).
+
+def run_tailor_gemini(
+    job: JobListing,
+    profile: CandidateProfile,
+    master_resume_text: str,
+) -> TailoredAssets:
+    """Gemini Flash variant of run_tailor — used for the lower-scored long tail."""
+    import json
+    import time
+    import google.generativeai as genai
+    from google.api_core.exceptions import ResourceExhausted
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise EnvironmentError("GEMINI_API_KEY not set — required for Gemini tailor tier")
+    genai.configure(api_key=api_key)
+    model_name = os.getenv("MODEL_TAILORING_GEMINI") or "gemini-2.5-flash"
+    model = genai.GenerativeModel(model_name)
+
+    user_prompt = f"""{SYSTEM_PROMPT}
+
+Here is my complete master resume for reference:
+
+{master_resume_text}
+
+Here is the job I am applying to:
+
+Company: {job.company}
+Role: {job.title}
+Location: {job.location}
+Job Description:
+---
+{job.description}
+---
+
+My candidate profile summary: {profile.raw_summary}
+Total years of experience: {profile.total_yoe}
+
+Produce a complete tailored resume and application materials.
+
+Rules:
+- CRITICAL: The candidate has exactly {profile.total_yoe} years of experience. Always use this exact number. Do NOT calculate, estimate, or round YOE from resume dates — use {profile.total_yoe} as-is.
+- Copy all experience entries and projects EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any.
+- For each experience entry, write 3-5 achievement bullets reframed toward this specific JD. Use action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
+- summary: 2-3 sentences positioning me for THIS specific role. Do NOT include the words 'tailored to' or 'tailored for'.
+- skills: group into 3-4 categories (e.g. Languages, Frameworks, Tools & Cloud, Databases). Include all skills from master resume; highlight those relevant to JD first.
+- projects: include all projects from master resume. Write 1-2 bullets per project emphasising relevance to this JD.
+- education: single line in format "Degree | Institution | Graduation Year".
+- form_answers: include describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc.
+- job_title_used and company_name_used: use the exact values from the listing above.
+"""
+
+    logger.info(f"Calling {model_name} for tailoring (Gemini tier): '{job.title}' @ {job.company}")
+
+    response = None
+    for attempt in range(3):
+        try:
+            response = model.generate_content(
+                user_prompt,
+                generation_config=genai.GenerationConfig(
+                    temperature=0.3,
+                    max_output_tokens=8192,
+                    response_mime_type="application/json",
+                    response_schema=TailoredAssets,
+                ),
+            )
+            break
+        except ResourceExhausted:
+            if attempt == 2:
+                raise
+            wait = 60
+            logger.warning(f"Gemini rate limit hit, retrying in {wait}s... (attempt {attempt + 1}/3)")
+            time.sleep(wait)
+
+    try:
+        return TailoredAssets(**json.loads(response.text))
+    except Exception as e:
+        raise ValueError(f"Gemini tailor parse failed for '{job.title}': {e}\nRaw: {response.text[:500]}")

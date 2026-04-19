@@ -18,8 +18,7 @@ from agents.agent_0a_profiler import (
     extract_text_from_pdf,
     PROFILE_EXTRACTION_PROMPT,
 )
-from agents.agent_0b_scraper import JobListing
-from agents.agent_1 import TailoredAssets, SYSTEM_PROMPT
+from agents.agent_1 import run_tailor_gemini  # noqa: F401 — re-export for test_pipeline.py
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -32,7 +31,7 @@ def _get_gemini_model(env_var: str = "GEMINI_MODEL") -> genai.GenerativeModel:
     if not api_key:
         raise EnvironmentError("GEMINI_API_KEY not set")
     genai.configure(api_key=api_key)
-    model_name = os.getenv(env_var, DEFAULT_GEMINI_MODEL)
+    model_name = os.getenv(env_var) or DEFAULT_GEMINI_MODEL
     return genai.GenerativeModel(model_name)
 
 
@@ -87,75 +86,6 @@ def build_candidate_profile_gemini(resume_pdf_path: str) -> CandidateProfile:
     return profile
 
 
-# ── Agent 1 override: Tailor via Gemini ──────────────────────────────────────
-
-def run_tailor_gemini(
-    job: JobListing,
-    profile: CandidateProfile,
-    master_resume_text: str,
-) -> TailoredAssets:
-    """Same as agent_1.run_tailor but uses Gemini Flash with native structured output."""
-    model = _get_gemini_model("MODEL_TAILORING_GEMINI")
-
-    user_prompt = f"""{SYSTEM_PROMPT}
-
-Here is my complete master resume for reference:
-
-{master_resume_text}
-
-Here is the job I am applying to:
-
-Company: {job.company}
-Role: {job.title}
-Location: {job.location}
-Job Description:
----
-{job.description}
----
-
-My candidate profile summary: {profile.raw_summary}
-Total years of experience: {profile.total_yoe}
-
-Produce a complete tailored resume and application materials.
-
-Rules:
-- CRITICAL: The candidate has exactly {profile.total_yoe} years of experience. Always use this exact number. Do NOT calculate, estimate, or round YOE from resume dates — use {profile.total_yoe} as-is.
-- Copy all experience entries and projects EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any.
-- For each experience entry, write 3-5 achievement bullets reframed toward this specific JD. Use action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
-- summary: 2-3 sentences positioning me for THIS specific role. Do NOT include the words 'tailored to' or 'tailored for'.
-- skills: group into 3-4 categories (e.g. Languages, Frameworks, Tools & Cloud, Databases). Include all skills from master resume; highlight those relevant to JD first.
-- projects: include all projects from master resume. Write 1-2 bullets per project emphasising relevance to this JD.
-- education: single line in format "Degree | Institution | Graduation Year".
-- form_answers: include describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc.
-- job_title_used and company_name_used: use the exact values from the listing above.
-"""
-
-    logger.info(f"[GEMINI OVERRIDE] Calling Gemini for tailoring: '{job.title}' @ {job.company} (structured output)")
-
-    import time
-    from google.api_core.exceptions import ResourceExhausted
-
-    for attempt in range(3):
-        try:
-            response = model.generate_content(
-                user_prompt,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.3,
-                    max_output_tokens=8192,
-                    response_mime_type="application/json",
-                    response_schema=TailoredAssets,
-                ),
-            )
-            break
-        except ResourceExhausted:
-            if attempt == 2:
-                raise
-            wait = 60
-            logger.warning(f"Rate limit hit, retrying in {wait}s... (attempt {attempt + 1}/3)")
-            time.sleep(wait)
-
-    try:
-        data = json.loads(response.text)
-        return TailoredAssets(**data)
-    except Exception as e:
-        raise ValueError(f"Gemini tailor parse failed for '{job.title}': {e}\nRaw: {response.text[:500]}")
+# Agent 1 tailor override now lives in agents/agent_1.py as run_tailor_gemini
+# (promoted to production path so main.py can use it for the long-tail tier).
+# It is re-exported at the top of this file for test_pipeline.py's imports.

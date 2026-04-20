@@ -46,7 +46,11 @@ The split is deliberate and drives most design decisions:
 
 ### Dedup (important)
 
-`main.py` loads `state/seen_jobs.json` from S3 before the ranker, filters already-processed `job_id`s out of the scraper output, adds each job to `seen_ids` **immediately after successful publish** (so a partial run still records wins), and writes the updated set back at the end. `job_id` is `md5(company.lower() + "-" + title.lower())[:12]` from `agent_0b_scraper._make_job_id`.
+`main.py` loads `state/seen_jobs.json` from S3 before the ranker and filters jobs whose `job_id` is already recorded with `status="published"`. Jobs recorded as `status="failed"` fall through and get retried. Each outcome is recorded into the in-memory state **immediately** via `_record_result` (so a partial run still persists wins and failures), and the whole state is saved back at the end.
+
+State shape (v2): `{"version": 2, "jobs": {job_id: {"status": "published"|"failed", "first_seen": "YYYY-MM-DD", "last_attempt": "YYYY-MM-DD", "company": ..., "title": ...}}}`. A legacy v1 file (`{"job_ids": [...]}`) is detected on load and discarded with a warning — the hash scheme changed alongside v2, so old IDs cannot match new hashes.
+
+`job_id` is `md5(_normalize_for_id(company) + "-" + _normalize_for_id(title))[:12]` from `agent_0b_scraper._make_job_id`. `_normalize_for_id` strips `" | ..."` qualifiers and collapses non-alphanumerics so reposts that differ only in punctuation/whitespace/trailing tags (e.g. `"SDE II, Amazon Now"` vs `"SDE II Amazon Now"`) dedup correctly.
 
 ### Gemini override path
 

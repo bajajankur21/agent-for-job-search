@@ -15,13 +15,13 @@ class ExperienceEntry(BaseModel):
     company: str
     title: str
     dates: str
-    location: str = ""
+    location: str
     bullets: list[str]
 
 
 class ProjectEntry(BaseModel):
     name: str
-    tech_stack: str = ""
+    tech_stack: str
     bullets: list[str]
 
 

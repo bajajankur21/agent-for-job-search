@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import logging
+from datetime import date
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -26,50 +27,79 @@ logger = logging.getLogger("main")
 
 RESUME_PDF_PATH = Path("data/master_resume.pdf")
 SEEN_JOBS_S3_KEY = "state/seen_jobs.json"
+STATE_VERSION = 2
 
 
 # ── Seen-jobs deduplication ───────────────────────────────────────────────────
+# State shape (v2):
+#   {"version": 2, "jobs": {job_id: {status, first_seen, last_attempt, company, title}}}
+# status is "published" (dedup on next run) or "failed" (retry on next run).
 
-def _load_seen_ids(s3_client, bucket: str) -> set[str]:
-    """
-    Loads the set of already-processed job IDs from S3.
-    Returns an empty set if the file doesn't exist yet (first run).
-    """
+def _load_seen_state(s3_client, bucket: str) -> dict:
+    """Load processed-jobs state from S3. Returns {job_id: entry}."""
     try:
         obj = s3_client.get_object(Bucket=bucket, Key=SEEN_JOBS_S3_KEY)
         data = json.loads(obj["Body"].read())
-        seen = set(data.get("job_ids", []))
-        logger.info(f"Loaded {len(seen)} previously processed job IDs from S3")
-        return seen
     except ClientError as e:
         if e.response["Error"]["Code"] in ("NoSuchKey", "404"):
             logger.info("No seen-jobs state found in S3 — starting fresh")
-            return set()
+            return {}
         logger.warning(f"Could not load seen-jobs state: {e}. Proceeding without dedup.")
-        return set()
+        return {}
+
+    if isinstance(data, dict) and data.get("version") == STATE_VERSION:
+        jobs = data.get("jobs", {}) or {}
+        published = sum(1 for e in jobs.values() if e.get("status") == "published")
+        failed = sum(1 for e in jobs.values() if e.get("status") == "failed")
+        logger.info(f"Loaded state: {published} published, {failed} failed (will retry)")
+        return jobs
+
+    # v1 shape: {"job_ids": [...]}. The hash scheme changed alongside v2, so
+    # old IDs cannot match new hashes — drop them and reset dedup for this run.
+    if isinstance(data, dict) and "job_ids" in data:
+        logger.warning(
+            f"Migrating from v1 state ({len(data['job_ids'])} entries). "
+            f"Hash scheme changed — dropping old entries; dedup resets this run."
+        )
+        return {}
+
+    logger.warning(f"Unknown state shape in {SEEN_JOBS_S3_KEY}; starting fresh")
+    return {}
 
 
-def _save_seen_ids(s3_client, bucket: str, seen_ids: set[str]) -> None:
-    """Persists the seen job IDs back to S3 after the run."""
+def _save_seen_state(s3_client, bucket: str, jobs: dict) -> None:
     try:
+        body = {"version": STATE_VERSION, "jobs": jobs}
         s3_client.put_object(
             Bucket=bucket,
             Key=SEEN_JOBS_S3_KEY,
-            Body=json.dumps({"job_ids": sorted(seen_ids)}, indent=2),
+            Body=json.dumps(body, indent=2, sort_keys=True),
             ContentType="application/json",
         )
-        logger.info(f"Saved {len(seen_ids)} seen job IDs to S3")
+        logger.info(f"Saved state: {len(jobs)} total entries")
     except Exception as e:
         logger.warning(f"Could not save seen-jobs state: {e}")
 
 
-def _filter_seen(jobs: list[JobListing], seen_ids: set[str]) -> list[JobListing]:
-    """Removes jobs that have already been processed in a previous run."""
-    fresh = [job for job in jobs if job.job_id not in seen_ids]
+def _filter_seen(jobs: list[JobListing], state: dict) -> list[JobListing]:
+    """Drop jobs already successfully published. Failed jobs fall through for retry."""
+    fresh = [j for j in jobs if state.get(j.job_id, {}).get("status") != "published"]
     skipped = len(jobs) - len(fresh)
     if skipped:
-        logger.info(f"Dedup: skipped {skipped} already-processed jobs, {len(fresh)} new")
+        logger.info(f"Dedup: skipped {skipped} already-published jobs, {len(fresh)} to process")
     return fresh
+
+
+def _record_result(state: dict, job: JobListing, status: str) -> None:
+    today = date.today().isoformat()
+    existing = state.get(job.job_id, {})
+    state[job.job_id] = {
+        "status": status,
+        "first_seen": existing.get("first_seen") or today,
+        "last_attempt": today,
+        "company": job.company,
+        "title": job.title,
+    }
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -120,8 +150,8 @@ def main():
 
     # ── Dedup: drop seen jobs BEFORE the ranker so we don't waste tokens
     #     scoring listings we've already processed in earlier runs. ────
-    seen_ids = _load_seen_ids(s3_client, bucket_name)
-    raw_jobs = _filter_seen(raw_jobs, seen_ids)
+    seen_state = _load_seen_state(s3_client, bucket_name)
+    raw_jobs = _filter_seen(raw_jobs, seen_state)
 
     if not raw_jobs:
         logger.info("All scraped jobs were already processed in earlier runs. Nothing new.")
@@ -157,8 +187,8 @@ def main():
             tailored = tailor_fn(job, profile, master_resume_text)
             uploads = publish_to_s3(job, tailored, profile, score)
 
-            # Mark as processed immediately — even if later jobs fail this one is done
-            seen_ids.add(job.job_id)
+            # Record success immediately — even if later jobs fail this one is done
+            _record_result(seen_state, job, "published")
 
             results_summary.append({
                 "job": f"{job.title} @ {job.company}",
@@ -168,6 +198,7 @@ def main():
 
         except Exception as e:
             logger.error(f"Pipeline failed for '{job.title}' @ {job.company}: {e}")
+            _record_result(seen_state, job, "failed")
             results_summary.append({
                 "job": f"{job.title} @ {job.company}",
                 "status": "ERROR",
@@ -175,8 +206,8 @@ def main():
             })
             continue
 
-    # ── Persist seen IDs so next run skips these jobs ─────────────────
-    _save_seen_ids(s3_client, bucket_name, seen_ids)
+    # ── Persist state so next run dedups published and retries failed ─
+    _save_seen_state(s3_client, bucket_name, seen_state)
 
     # ── Final summary ─────────────────────────────────────────────────
     logger.info("\n" + "=" * 60)

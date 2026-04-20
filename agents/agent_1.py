@@ -212,14 +212,43 @@ Rules:
         raise ValueError(f"Could not validate tailored assets for '{job.title}': {e}")
 
 
-# ── Gemini Flash tier for long-tail jobs ─────────────────────────────────────
+# ── Gemma tier for long-tail jobs ────────────────────────────────────────────
 # Top-scored jobs go through run_tailor (Claude Sonnet, cached master resume).
-# Lower-scored jobs go through run_tailor_gemini (free tier, ~1500 RPD on Flash).
+# Lower-scored jobs go through run_tailor_gemini → Gemma 4 31B on AI Studio
+# (free tier: 15 RPM, UNLIMITED TPM, UNLIMITED RPD). We self-throttle to 14
+# RPM (sliding window) to stay one below the ceiling; with no daily cap, the
+# only pacing constraint is per-minute. For ~40 jobs this adds ~3 min of
+# total wall-clock. `gemma-3-27b-it` also works if the user prefers it
+# (higher RPM, lower RPD ceiling) — set MODEL_TAILORING_GEMINI to override.
 #
-# Gemini's response_schema does not support `additionalProperties`, so the
-# open-shape TailoredAssets fields (`skills: dict[str, list[str]]` and
-# `form_answers: dict`) can't be fed to Gemini directly. We mirror the model
-# with fixed-key equivalents, ask Gemini for that shape, then map back.
+# Gemma on AI Studio does NOT support response_schema or response_mime_type
+# (JSON mode is disabled: "JSON mode is not enabled for models/gemma-*-it").
+# So we drive the JSON shape purely through a strict prompt + robust parser,
+# and validate with Pydantic. Fixed-key `_GeminiSkills` + `_GeminiFormAnswers`
+# are retained because a literal-key schema is easier for the model to hit.
+
+# Sliding-window RPM limiter shared across all run_tailor_gemini calls in the
+# process. Module-level so it persists across the per-job loop in main.py.
+from collections import deque as _deque
+import time as _time
+
+_GEMMA_CALL_TIMES: _deque = _deque()
+
+
+def _wait_for_gemma_rpm_slot() -> None:
+    """Block until a new request would stay under the rolling-60s RPM ceiling."""
+    limit = int(os.getenv("GEMMA_RPM_LIMIT", "14"))
+    now = _time.monotonic()
+    while _GEMMA_CALL_TIMES and now - _GEMMA_CALL_TIMES[0] > 60:
+        _GEMMA_CALL_TIMES.popleft()
+    if len(_GEMMA_CALL_TIMES) >= limit:
+        wait = 60 - (now - _GEMMA_CALL_TIMES[0]) + 0.5
+        if wait > 0:
+            logger.info(
+                f"Gemma RPM ceiling reached ({limit}/min) — pausing {wait:.1f}s before next call"
+            )
+            _time.sleep(wait)
+    _GEMMA_CALL_TIMES.append(_time.monotonic())
 
 class _GeminiSkills(BaseModel):
     languages: list[str] = Field(description="Programming languages relevant to the JD")
@@ -274,82 +303,161 @@ def _gemini_to_tailored(raw: _GeminiTailoredAssets) -> TailoredAssets:
     )
 
 
+def _extract_json_object(text: str) -> str:
+    """Strip markdown fences / prose and return the first top-level JSON object."""
+    text = text.strip()
+    if text.startswith("```"):
+        # Drop opening fence (```json or ```) and trailing ```
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+        text = text.strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end <= start:
+        raise ValueError(f"No JSON object found in response: {text[:300]}")
+    return text[start:end + 1]
+
+
+_GEMMA_JSON_TEMPLATE = """{
+  "summary": "<exactly 2 sentences positioning the candidate for THIS role>",
+  "experience": [
+    {
+      "company": "<string, exact from master resume>",
+      "title": "<string, exact from master resume>",
+      "dates": "<e.g. Jan 2023 - Present, exact from master resume>",
+      "location": "<string, exact from master resume>",
+      "bullets": ["<bullet under 20 words>", "<bullet under 20 words>"]
+    }
+  ],
+  "skills": {
+    "languages": ["<lang>"],
+    "frameworks": ["<framework>"],
+    "tools_and_cloud": ["<tool>"],
+    "databases": ["<db>"]
+  },
+  "projects": [
+    {
+      "name": "<string>",
+      "tech_stack": "<comma-separated>",
+      "bullets": ["<single bullet>"]
+    }
+  ],
+  "education": "<Degree | Institution | Graduation Year>",
+  "form_answers": {
+    "describe_last_role": "<string>",
+    "describe_second_last_role": "<string>",
+    "why_this_company": "<string>",
+    "biggest_achievement": "<STAR-format>",
+    "notice_period": "<string>",
+    "expected_ctc": "<string>"
+  },
+  "job_title_used": "<exact title from the listing>",
+  "company_name_used": "<exact company from the listing>"
+}"""
+
+
 def run_tailor_gemini(
     job: JobListing,
     profile: CandidateProfile,
     master_resume_text: str,
 ) -> TailoredAssets:
-    """Gemini Flash variant of run_tailor — used for the lower-scored long tail."""
+    """Gemma 4 31B variant of run_tailor — long-tail tier on AI Studio free quota.
+
+    Uses prompt-enforced JSON + robust parser because Gemma on AI Studio does
+    not expose JSON mode / response_schema. Client-side RPM throttle keeps us
+    under the 15/min ceiling (unlimited RPD on Gemma 4). Retries on rate-limit
+    AND on JSON/schema validation failures (the model usually recovers on
+    retry once it sees that its first output was malformed).
+    """
     import json
     import time
     import google.generativeai as genai
     from google.api_core.exceptions import ResourceExhausted
+    from pydantic import ValidationError
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
-        raise EnvironmentError("GEMINI_API_KEY not set — required for Gemini tailor tier")
+        raise EnvironmentError("GEMINI_API_KEY not set — required for Gemma tailor tier")
     genai.configure(api_key=api_key)
-    model_name = os.getenv("MODEL_TAILORING_GEMINI") or "gemini-2.5-flash"
+    model_name = os.getenv("MODEL_TAILORING_GEMINI") or "gemma-4-31b-it"
     model = genai.GenerativeModel(model_name)
 
-    user_prompt = f"""{SYSTEM_PROMPT}
+    prompt = f"""You are an expert technical resume writer and career coach. You tailor resumes to specific job descriptions. Your output is precise, achievement-oriented, and passes ATS scanners. You never fabricate experience or invent numbers — you only amplify and reframe what exists in the master resume.
 
-Here is my complete master resume for reference:
+Your SINGLE task: output one JSON object matching the schema below. No prose. No markdown fences. No explanations. Start with {{ and end with }}.
 
+=== MASTER RESUME ===
 {master_resume_text}
+=== END MASTER RESUME ===
 
-Here is the job I am applying to:
-
+=== TARGET JOB ===
 Company: {job.company}
 Role: {job.title}
 Location: {job.location}
 Job Description:
----
 {job.description}
----
+=== END TARGET JOB ===
 
-My candidate profile summary: {profile.raw_summary}
+=== CANDIDATE META ===
+Summary: {profile.raw_summary}
 Total years of experience: {profile.total_yoe}
+=== END CANDIDATE META ===
 
-Produce a complete tailored resume and application materials.
+=== HARD RULES — VIOLATING ANY OF THESE IS A FAILURE ===
+R1. Output is ONE JSON object. No text before {{. No text after }}. No ```json fences.
+R2. The candidate has EXACTLY {profile.total_yoe} years of experience. Use this number verbatim if you mention YOE anywhere. Do not recompute from dates.
+R3. Copy every experience entry from the master resume EXACTLY — same company, title, dates, location. Do not invent, omit, reorder, or merge entries.
+R4. Every experience bullet is under 20 words, starts with an action verb, and references tech or responsibilities from the target JD. Quantified impact only if the number appears in the master resume. NEVER invent numbers.
+R5. Each experience entry has 2 or 3 bullets — no more, no less.
+R6. `summary` is EXACTLY 2 sentences. Never use the phrases "tailored to", "tailored for", "seeking to", "passionate about".
+R7. `skills` has exactly these 4 keys: "languages", "frameworks", "tools_and_cloud", "databases". Each value is an array of strings. JD-relevant items first. Use [] for a category with nothing relevant — do NOT omit the key.
+R8. `projects` has EXACTLY 2 entries — the 2 most JD-relevant projects from the master resume. Each project has exactly 1 bullet. Drop the rest.
+R9. `education` is a single line: "Degree | Institution | Graduation Year".
+R10. `form_answers` has all 6 keys populated with non-empty strings: describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc.
+R11. `job_title_used` = "{job.title}" and `company_name_used` = "{job.company}" — copy these exact strings.
+R12. Total output must fit on a single A4 resume page when rendered. Be ruthless — drop low-signal content.
 
-Rules:
-- CRITICAL: The resume MUST fit on a single A4 page. Be ruthless — drop low-signal content rather than overflow.
-- CRITICAL: The candidate has exactly {profile.total_yoe} years of experience. Always use this exact number. Do NOT calculate, estimate, or round YOE from resume dates — use {profile.total_yoe} as-is.
-- Copy all experience entries EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any experience entry.
-- For each experience entry, write 2-3 achievement bullets reframed toward this specific JD. Each bullet under ~20 words. Action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
-- summary: 2 concise sentences positioning me for THIS specific role. Do NOT include the words 'tailored to' or 'tailored for'.
-- skills: populate the four fixed categories — `languages`, `frameworks`, `tools_and_cloud`, `databases`. JD-relevant items first in each list. Return `[]` for a category that genuinely doesn't apply.
-- projects: include ONLY the top 2 projects from the master resume most relevant to this JD. Write 1 bullet per project. Drop the rest — single-page constraint takes priority over completeness.
-- education: single line in format "Degree | Institution | Graduation Year".
-- form_answers: fill every key — describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc.
-- job_title_used and company_name_used: use the exact values from the listing above.
-"""
+=== OUTPUT SCHEMA (fill every field with real content, not placeholders) ===
+{_GEMMA_JSON_TEMPLATE}
 
-    logger.info(f"Calling {model_name} for tailoring (Gemini tier): '{job.title}' @ {job.company}")
+Reminder: output the JSON object only. Your first character must be {{ and your last character must be }}."""
 
-    response = None
+    logger.info(f"Calling {model_name} for tailoring (Gemma tier): '{job.title}' @ {job.company}")
+
+    last_err: Exception | None = None
     for attempt in range(3):
         try:
+            _wait_for_gemma_rpm_slot()
             response = model.generate_content(
-                user_prompt,
+                prompt,
                 generation_config=genai.GenerationConfig(
-                    temperature=0.3,
+                    temperature=0.2,
                     max_output_tokens=8192,
-                    response_mime_type="application/json",
-                    response_schema=_GeminiTailoredAssets,
                 ),
             )
-            break
-        except ResourceExhausted:
+            raw_json = _extract_json_object(response.text)
+            parsed = _GeminiTailoredAssets(**json.loads(raw_json))
+            return _gemini_to_tailored(parsed)
+
+        except ResourceExhausted as e:
+            last_err = e
             if attempt == 2:
                 raise
-            wait = 60
-            logger.warning(f"Gemini rate limit hit, retrying in {wait}s... (attempt {attempt + 1}/3)")
-            time.sleep(wait)
+            logger.warning(f"Gemma rate limit hit, retrying in 60s... (attempt {attempt + 1}/3)")
+            time.sleep(60)
 
-    try:
-        raw = _GeminiTailoredAssets(**json.loads(response.text))
-        return _gemini_to_tailored(raw)
-    except Exception as e:
-        raise ValueError(f"Gemini tailor parse failed for '{job.title}': {e}\nRaw: {response.text[:500]}")
+        except (json.JSONDecodeError, ValidationError, ValueError) as e:
+            last_err = e
+            if attempt == 2:
+                preview = getattr(response, "text", "")[:500] if "response" in dir() else "<no response>"
+                raise ValueError(
+                    f"Gemma output failed JSON/schema validation after 3 attempts for '{job.title}': {e}\n"
+                    f"Last raw output: {preview}"
+                )
+            logger.warning(
+                f"Gemma JSON/schema invalid, retrying... (attempt {attempt + 1}/3): {e}"
+            )
+
+    # Unreachable — loop either returns or raises. Guard to satisfy type checkers.
+    raise RuntimeError(f"Unexpected fallthrough in run_tailor_gemini: {last_err}")

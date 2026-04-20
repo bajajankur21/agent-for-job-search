@@ -122,6 +122,20 @@ def _scrape_one_term(
         except Exception as e:
             logger.error(f"  [glassdoor] '{term}' failed: {e}")
 
+    if "naukri" in sites:
+        try:
+            df = jobspy_scrape(
+                site_name=["naukri"],
+                search_term=term,
+                location=location,
+                results_wanted=results_per_site,
+                hours_old=hours_old,
+            )
+            logger.info(f"  [naukri] '{term}' → {len(df)} results")
+            frames.append(df)
+        except Exception as e:
+            logger.error(f"  [naukri] '{term}' failed: {e}")
+
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)

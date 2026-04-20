@@ -215,6 +215,64 @@ Rules:
 # ── Gemini Flash tier for long-tail jobs ─────────────────────────────────────
 # Top-scored jobs go through run_tailor (Claude Sonnet, cached master resume).
 # Lower-scored jobs go through run_tailor_gemini (free tier, ~1500 RPD on Flash).
+#
+# Gemini's response_schema does not support `additionalProperties`, so the
+# open-shape TailoredAssets fields (`skills: dict[str, list[str]]` and
+# `form_answers: dict`) can't be fed to Gemini directly. We mirror the model
+# with fixed-key equivalents, ask Gemini for that shape, then map back.
+
+class _GeminiSkills(BaseModel):
+    languages: list[str] = Field(description="Programming languages relevant to the JD")
+    frameworks: list[str] = Field(description="Frameworks and libraries relevant to the JD")
+    tools_and_cloud: list[str] = Field(description="Build tools, cloud platforms, infrastructure")
+    databases: list[str] = Field(description="SQL and NoSQL databases / storage systems")
+
+
+class _GeminiFormAnswers(BaseModel):
+    describe_last_role: str
+    describe_second_last_role: str
+    why_this_company: str
+    biggest_achievement: str = Field(description="STAR-format achievement most relevant to this JD")
+    notice_period: str
+    expected_ctc: str
+
+
+class _GeminiTailoredAssets(BaseModel):
+    summary: str
+    experience: list[ExperienceEntry]
+    skills: _GeminiSkills
+    projects: list[ProjectEntry]
+    education: str
+    form_answers: _GeminiFormAnswers
+    job_title_used: str
+    company_name_used: str
+
+
+_GEMINI_SKILL_DISPLAY = {
+    "languages": "Languages",
+    "frameworks": "Frameworks",
+    "tools_and_cloud": "Tools & Cloud",
+    "databases": "Databases",
+}
+
+
+def _gemini_to_tailored(raw: _GeminiTailoredAssets) -> TailoredAssets:
+    skills_dict = {
+        _GEMINI_SKILL_DISPLAY[key]: values
+        for key, values in raw.skills.model_dump().items()
+        if values
+    }
+    return TailoredAssets(
+        summary=raw.summary,
+        experience=raw.experience,
+        skills=skills_dict,
+        projects=raw.projects,
+        education=raw.education,
+        form_answers=raw.form_answers.model_dump(),
+        job_title_used=raw.job_title_used,
+        company_name_used=raw.company_name_used,
+    )
+
 
 def run_tailor_gemini(
     job: JobListing,
@@ -261,10 +319,10 @@ Rules:
 - Copy all experience entries EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any experience entry.
 - For each experience entry, write 2-3 achievement bullets reframed toward this specific JD. Each bullet under ~20 words. Action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
 - summary: 2 concise sentences positioning me for THIS specific role. Do NOT include the words 'tailored to' or 'tailored for'.
-- skills: group into 3-4 categories (e.g. Languages, Frameworks, Tools & Cloud, Databases). Include JD-relevant skills first; trim less relevant ones.
+- skills: populate the four fixed categories — `languages`, `frameworks`, `tools_and_cloud`, `databases`. JD-relevant items first in each list. Return `[]` for a category that genuinely doesn't apply.
 - projects: include ONLY the top 2 projects from the master resume most relevant to this JD. Write 1 bullet per project. Drop the rest — single-page constraint takes priority over completeness.
 - education: single line in format "Degree | Institution | Graduation Year".
-- form_answers: include describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc.
+- form_answers: fill every key — describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc.
 - job_title_used and company_name_used: use the exact values from the listing above.
 """
 
@@ -279,7 +337,7 @@ Rules:
                     temperature=0.3,
                     max_output_tokens=8192,
                     response_mime_type="application/json",
-                    response_schema=TailoredAssets,
+                    response_schema=_GeminiTailoredAssets,
                 ),
             )
             break
@@ -291,6 +349,7 @@ Rules:
             time.sleep(wait)
 
     try:
-        return TailoredAssets(**json.loads(response.text))
+        raw = _GeminiTailoredAssets(**json.loads(response.text))
+        return _gemini_to_tailored(raw)
     except Exception as e:
         raise ValueError(f"Gemini tailor parse failed for '{job.title}': {e}\nRaw: {response.text[:500]}")

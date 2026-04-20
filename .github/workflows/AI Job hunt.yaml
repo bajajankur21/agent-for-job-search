@@ -49,6 +49,9 @@ jobs:
           MODEL_PROFILER: ${{ vars.MODEL_PROFILER }}
           MODEL_TAILORING: ${{ vars.MODEL_TAILORING }}
           MODEL_SCORER: ${{ vars.MODEL_SCORER }}
+          # Route every ranked job through the Gemini tier (skip Claude tailoring).
+          # Restore to "6" (or remove) to re-enable Claude for top-scored jobs.
+          TOP_TIER_CLAUDE_COUNT: "0"
         run: python main.py
 
 #  cleanup:

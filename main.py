@@ -142,7 +142,7 @@ def main():
 
     # ── Agent 0B: Scrape jobs ─────────────────────────────────────────
     logger.info("\n[AGENT 0B] Scraping jobs via JobSpy (LinkedIn + Indeed)...")
-    raw_jobs = scrape_jobs(profile, target_raw=80)
+    raw_jobs = scrape_jobs(profile, target_raw=500)
 
     if not raw_jobs:
         logger.warning("No jobs found. Pipeline complete (nothing to process).")

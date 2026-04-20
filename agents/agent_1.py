@@ -66,9 +66,9 @@ TAILORING_TOOL = {
                         "bullets": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "minItems": 3,
-                            "maxItems": 5,
-                            "description": "3-5 achievement bullets reframed toward this JD. Action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.",
+                            "minItems": 2,
+                            "maxItems": 3,
+                            "description": "2-3 achievement bullets reframed toward this JD. Action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers. Keep each bullet under ~20 words so the resume fits on one page.",
                         },
                     },
                     "required": ["company", "title", "dates", "location", "bullets"],
@@ -81,6 +81,8 @@ TAILORING_TOOL = {
             },
             "projects": {
                 "type": "array",
+                "maxItems": 2,
+                "description": "Top 2 most JD-relevant projects from the master resume. Drop the rest to keep the resume on one page.",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -90,7 +92,7 @@ TAILORING_TOOL = {
                             "type": "array",
                             "items": {"type": "string"},
                             "minItems": 1,
-                            "maxItems": 2,
+                            "maxItems": 1,
                         },
                     },
                     "required": ["name", "tech_stack", "bullets"],
@@ -154,12 +156,13 @@ Total years of experience: {profile.total_yoe}
 Call the `produce_tailored_resume` tool with a complete tailored resume and application materials.
 
 Rules:
+- CRITICAL: The resume MUST fit on a single A4 page. Be ruthless — drop low-signal content rather than overflow.
 - CRITICAL: The candidate has exactly {profile.total_yoe} years of experience. Always use this exact number. Do NOT calculate, estimate, or round YOE from resume dates — use {profile.total_yoe} as-is.
-- Copy all experience entries and projects EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any.
-- For each experience entry, write 3-5 achievement bullets reframed toward this specific JD. Use action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
-- The summary must be 2-3 sentences positioning me for THIS specific role.
-- Skills: group into 3-4 categories. Include all skills from master resume; highlight those relevant to JD first.
-- Projects: include all projects from master resume. Write 1-2 bullets per project emphasising relevance to this JD.
+- Copy all experience entries EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any experience entry.
+- For each experience entry, write 2-3 achievement bullets reframed toward this specific JD. Each bullet under ~20 words. Action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
+- The summary must be 2 concise sentences positioning me for THIS specific role.
+- Skills: group into 3-4 categories. Include JD-relevant skills first; trim less relevant ones.
+- Projects: include ONLY the top 2 projects from the master resume most relevant to this JD. Write 1 bullet per project. Drop the rest — single-page constraint takes priority over completeness.
 - Education: single line in format "Degree | Institution | Graduation Year".
 """
 
@@ -253,12 +256,13 @@ Total years of experience: {profile.total_yoe}
 Produce a complete tailored resume and application materials.
 
 Rules:
+- CRITICAL: The resume MUST fit on a single A4 page. Be ruthless — drop low-signal content rather than overflow.
 - CRITICAL: The candidate has exactly {profile.total_yoe} years of experience. Always use this exact number. Do NOT calculate, estimate, or round YOE from resume dates — use {profile.total_yoe} as-is.
-- Copy all experience entries and projects EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any.
-- For each experience entry, write 3-5 achievement bullets reframed toward this specific JD. Use action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
-- summary: 2-3 sentences positioning me for THIS specific role. Do NOT include the words 'tailored to' or 'tailored for'.
-- skills: group into 3-4 categories (e.g. Languages, Frameworks, Tools & Cloud, Databases). Include all skills from master resume; highlight those relevant to JD first.
-- projects: include all projects from master resume. Write 1-2 bullets per project emphasising relevance to this JD.
+- Copy all experience entries EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any experience entry.
+- For each experience entry, write 2-3 achievement bullets reframed toward this specific JD. Each bullet under ~20 words. Action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
+- summary: 2 concise sentences positioning me for THIS specific role. Do NOT include the words 'tailored to' or 'tailored for'.
+- skills: group into 3-4 categories (e.g. Languages, Frameworks, Tools & Cloud, Databases). Include JD-relevant skills first; trim less relevant ones.
+- projects: include ONLY the top 2 projects from the master resume most relevant to this JD. Write 1 bullet per project. Drop the rest — single-page constraint takes priority over completeness.
 - education: single line in format "Degree | Institution | Graduation Year".
 - form_answers: include describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc.
 - job_title_used and company_name_used: use the exact values from the listing above.

@@ -95,7 +95,7 @@ Rules:
 - For search_keywords: generate 8-12 SHORT job title keywords (1-3 words each) for Google Jobs search. These will be used directly as search queries, so make them seniority-appropriate. For junior/entry-level candidates, include role variants like "Junior Developer", "SDE 1", "Associate Engineer", "Graduate Engineer". For mid-level, include both plain and "SDE II" style. For senior, include "Senior", "Lead". Always include plain role titles (e.g. "Backend Engineer") alongside seniority-qualified ones. Each keyword must work as a standalone search term.
 - For company_type_preference: always set to "product" unless the resume strongly signals service/consulting background.
 - For preferred_locations: default to ["Bengaluru", "Remote"] unless other locations are stated.
-- For max_yoe_applying_for: set to total_yoe + 1, capped at 5.
+- For max_yoe_applying_for: set to total_yoe + 1, capped at 3 (must always be < 4 to filter out 4-6 YOE jobs).
 
 Resume text:
 ---

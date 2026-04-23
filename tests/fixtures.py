@@ -6,7 +6,7 @@ Update these to match your actual resume / expected test data.
 
 from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
-from agents.agent_1 import TailoredAssets, ExperienceEntry, ProjectEntry
+from agents.agent_1 import TailoredAssets, ExperienceEntry, EducationEntry
 
 
 def mock_agent_0a() -> CandidateProfile:
@@ -96,58 +96,56 @@ def mock_agent_0c(jobs: list[JobListing]) -> list[tuple[JobListing, int]]:
 
 
 def mock_agent_1(job: JobListing) -> TailoredAssets:
-    """Mock tailor — returns plausible placeholder assets matching the full resume structure."""
+    """Mock tailor — returns plausible placeholder assets matching the master resume structure."""
     return TailoredAssets(
-        summary=(
-            f"Junior software engineer with 1.5 years of experience building backend services "
-            f"and React frontends, applying for {job.title} at {job.company}. "
-            "Proven track record delivering scalable REST APIs and cloud-deployed microservices."
-        ),
         experience=[
             ExperienceEntry(
-                company="Infosys BPM",
-                title="Software Engineer",
-                dates="Jul 2023 – Present",
-                location="Bengaluru, India",
+                company="Philips",
+                title="Software Development Engineer",
+                dates="Aug. 2023 – Present",
+                location="Bangalore, India",
                 bullets=[
-                    "Built scalable REST APIs serving 10K+ requests/day using Python and FastAPI",
-                    "Developed responsive frontend dashboards with React and TypeScript",
-                    "Deployed microservices on AWS ECS with CI/CD pipelines reducing release time by 30%",
-                    "Reduced API latency by 40% through query optimisation and Redis caching",
+                    "**Frontend Platform:** Directed a 4-member team to architect an enterprise launchpad using **React**, **TypeScript**, and **AWS Serverless**, increasing deployment frequency by **35%** for **10k+** daily users.",
+                    "**MFE Architecture:** Engineered MFE solutions using **Module Federation** and **Vite**, slashing session-related errors by **40%** while improving page load speeds by **1.2s**.",
+                    "**UI Design Systems:** Designed dynamic forms and workflow-based UI components; improved component reusability by **60%**, saving **150+** engineering hours per quarter.",
+                    "**Cloud Infrastructure:** Managed **Java Spring Boot** microservices on **AWS EKS** for IoT medical device connectivity, maintaining **99.9%** uptime and supporting **50k+** concurrent connections.",
+                    "**Data Integration:** Developed a **Python**-based serverless data lake backend and a **React** analytics dashboard that reduced manual data entry by **80%**.",
+                    "**System Architecture:** Implemented **Domain-Driven Design (DDD)** and **Design Patterns (Strategy, Proxy, Facade)**, resulting in a **25%** reduction in technical debt.",
                 ],
             ),
             ExperienceEntry(
-                company="Freelance",
-                title="Full Stack Developer",
-                dates="Jan 2023 – Jun 2023",
-                location="Remote",
+                company="Philips",
+                title="SDE Intern",
+                dates="Feb. 2023 – July 2023",
+                location="Bangalore, India",
                 bullets=[
-                    "Delivered 3 client web apps using React and Node.js within tight deadlines",
-                    "Implemented OAuth2 authentication and role-based access control",
+                    "**Cloud Automation:** Built a secure **AWS Serverless** application using **Python (Boto3)**, **API Gateway**, and **PostgreSQL/DynamoDB**, reducing manual processing time from **3 days** to **15 minutes**.",
+                    "**Performance Tuning:** Optimized **PostgreSQL** queries and indexing, improving retrieval performance by **55%** and eliminating timeouts during peak hours.",
+                    "**Agile Collaboration:** Participated in an **Agile SDLC (Scrum)** environment, delivering **100%** of sprint commitments while refining technical requirements.",
                 ],
             ),
         ],
         skills={
-            "Languages": ["Python", "TypeScript", "Java", "SQL"],
-            "Frameworks": ["React", "FastAPI", "Node.js", "Express"],
-            "Tools & Cloud": ["AWS (ECS, S3, Lambda)", "Docker", "Git", "PostgreSQL"],
+            "Languages & Backend": ["Java", "Python", "SQL", "TypeScript", "Spring Boot", "REST APIs", "Microservices"],
+            "Frontend & Architecture": ["React.js", "Micro Frontends (MFE)", "Module Federation", "Vite", "Next.js"],
+            "Cloud & DevOps": ["AWS (Lambda, S3, DynamoDB)", "EKS", "CI/CD", "Infrastructure as Code (IaC)"],
+            "Testing & Design": ["Design Patterns", "Domain-Driven Design (DDD)", "Karate", "Jest", "Unit Testing"],
         },
-        projects=[
-            ProjectEntry(
-                name="Job Application Automation Agent",
-                tech_stack="Python, Claude AI, Gemini, JobSpy, AWS S3",
-                bullets=[
-                    "Built a multi-agent pipeline that scrapes, ranks, and tailors job applications autonomously",
-                    "Reduced manual application time from 2 hours to zero per day",
-                ],
-            ),
-        ],
-        education="B.Tech Computer Science | BITS Pilani | 2023",
+        interests="Badminton (University Team), Weightlifting, Adventure Sports, Reading",
+        education=EducationEntry(
+            institution="Chandigarh Group of Colleges",
+            degree="B.Tech in Computer Science & Engineering",
+            date="July 2023",
+            bullets=[
+                "**Leadership:** Captain of the University Badminton Team (led to multiple tournament wins).",
+                "**Management:** Finance head for flagship festival (**500+** delegates); Lead Anchor for university events.",
+            ],
+        ),
         form_answers={
-            "describe_last_role": "Built backend APIs and React frontends at Infosys BPM.",
-            "describe_second_last_role": "Delivered full-stack client projects as a freelance developer.",
+            "describe_last_role": "Software Development Engineer at Philips focused on frontend platform architecture using Module Federation and AWS Serverless.",
+            "describe_second_last_role": "SDE Intern at Philips building AWS Serverless automation and optimizing PostgreSQL performance.",
             "why_this_company": f"Strong engineering culture and impactful product at {job.company}.",
-            "biggest_achievement": "Reduced API latency by 40% through Redis caching and query optimisation.",
+            "biggest_achievement": "Reduced session-related errors by 40% via Micro Frontend architecture using Module Federation.",
             "notice_period": "Immediate to 30 days",
             "expected_ctc": "Open to discussion",
         },

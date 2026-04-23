@@ -1,207 +1,27 @@
 import os
 import json
 import logging
-import boto3
+from pathlib import Path
 from datetime import datetime
-from io import BytesIO
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Paragraph, HRFlowable
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
+
+import boto3
 from dotenv import load_dotenv
+
 from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
 from agents.agent_1 import TailoredAssets
+from agents.docx_renderer import render_tailored_docx
+from agents.pdf_converter import convert_docx_to_pdf
 
 load_dotenv()
 logger = logging.getLogger(__name__)
 
-# ── PDF colour palette ────────────────────────────────────────────────────────
-_DARK = colors.HexColor("#1a1a1a")
-_MID  = colors.HexColor("#555555")
-_RULE = colors.HexColor("#cccccc")
+_MASTER_DOCX_PATH = Path("data/master_resume.docx")
 
 
 def _sanitize_filename(text: str) -> str:
     """Converts 'GE HealthCare' → 'GEHealthCare' for safe S3 keys."""
     return "".join(c for c in text if c.isalnum() or c in "-_")
-
-
-def _escape(text: str) -> str:
-    """Escape ReportLab special characters."""
-    return (text
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;"))
-
-
-def _build_resume_pdf(assets: TailoredAssets, profile: CandidateProfile) -> bytes:
-    """
-    Renders a complete, ATS-friendly resume PDF from structured TailoredAssets.
-    Sections: Header, Summary, Experience, Skills, Projects, Education.
-    """
-    buffer = BytesIO()
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=A4,
-        rightMargin=18 * mm,
-        leftMargin=18 * mm,
-        topMargin=16 * mm,
-        bottomMargin=16 * mm,
-    )
-
-    # ── Styles ────────────────────────────────────────────────────────────────
-    name_style = ParagraphStyle(
-        "Name",
-        fontName="Helvetica-Bold",
-        fontSize=20,
-        leading=24,
-        textColor=_DARK,
-        alignment=TA_CENTER,
-        spaceAfter=2,
-    )
-    contact_style = ParagraphStyle(
-        "Contact",
-        fontName="Helvetica",
-        fontSize=9,
-        leading=12,
-        textColor=_MID,
-        alignment=TA_CENTER,
-        spaceAfter=4,
-    )
-    section_style = ParagraphStyle(
-        "Section",
-        fontName="Helvetica-Bold",
-        fontSize=10,
-        leading=13,
-        textColor=_DARK,
-        spaceBefore=10,
-        spaceAfter=3,
-    )
-    role_title_style = ParagraphStyle(
-        "RoleTitle",
-        fontName="Helvetica-Bold",
-        fontSize=10,
-        leading=13,
-        textColor=_DARK,
-        spaceBefore=6,
-        spaceAfter=1,
-    )
-    role_meta_style = ParagraphStyle(
-        "RoleMeta",
-        fontName="Helvetica-Oblique",
-        fontSize=9,
-        leading=12,
-        textColor=_MID,
-        spaceAfter=2,
-    )
-    body_style = ParagraphStyle(
-        "Body",
-        fontName="Helvetica",
-        fontSize=9.5,
-        leading=13,
-        textColor=_DARK,
-        alignment=TA_JUSTIFY,
-        spaceAfter=4,
-    )
-    bullet_style = ParagraphStyle(
-        "Bullet",
-        fontName="Helvetica",
-        fontSize=9.5,
-        leading=13,
-        textColor=_DARK,
-        leftIndent=12,
-        spaceAfter=2,
-    )
-    skill_style = ParagraphStyle(
-        "Skill",
-        fontName="Helvetica",
-        fontSize=9.5,
-        leading=13,
-        textColor=_DARK,
-        spaceAfter=3,
-    )
-
-    story = []
-
-    # ── Header ────────────────────────────────────────────────────────────────
-    story.append(Paragraph(_escape(profile.full_name), name_style))
-
-    contact_parts = []
-    if profile.location_city:
-        contact_parts.append(_escape(profile.location_city))
-    if profile.email:
-        contact_parts.append(_escape(profile.email))
-    if profile.phone:
-        contact_parts.append(_escape(profile.phone))
-    if profile.linkedin:
-        contact_parts.append(_escape(profile.linkedin))
-    if profile.github:
-        contact_parts.append(_escape(profile.github))
-
-    if contact_parts:
-        story.append(Paragraph("  |  ".join(contact_parts), contact_style))
-
-    story.append(HRFlowable(width="100%", thickness=1, color=_RULE, spaceAfter=6))
-
-    # ── Summary ───────────────────────────────────────────────────────────────
-    if assets.summary:
-        story.append(Paragraph("SUMMARY", section_style))
-        story.append(HRFlowable(width="100%", thickness=0.5, color=_RULE, spaceAfter=4))
-        story.append(Paragraph(_escape(assets.summary), body_style))
-
-    # ── Experience ────────────────────────────────────────────────────────────
-    if assets.experience:
-        story.append(Paragraph("EXPERIENCE", section_style))
-        story.append(HRFlowable(width="100%", thickness=0.5, color=_RULE, spaceAfter=4))
-
-        for exp in assets.experience:
-            # "Software Engineer  |  Razorpay"
-            header_text = f"<b>{_escape(exp.title)}</b>  |  {_escape(exp.company)}"
-            story.append(Paragraph(header_text, role_title_style))
-
-            # "Jan 2023 – Present  |  Bengaluru, India"
-            meta_parts = [_escape(exp.dates)]
-            if exp.location:
-                meta_parts.append(_escape(exp.location))
-            story.append(Paragraph("  |  ".join(meta_parts), role_meta_style))
-
-            for bullet in exp.bullets:
-                story.append(Paragraph(f"• {_escape(bullet)}", bullet_style))
-
-    # ── Skills ────────────────────────────────────────────────────────────────
-    if assets.skills:
-        story.append(Paragraph("SKILLS", section_style))
-        story.append(HRFlowable(width="100%", thickness=0.5, color=_RULE, spaceAfter=4))
-
-        for category, skill_list in assets.skills.items():
-            line = f"<b>{_escape(category)}:</b>  {_escape(', '.join(skill_list))}"
-            story.append(Paragraph(line, skill_style))
-
-    # ── Projects ──────────────────────────────────────────────────────────────
-    if assets.projects:
-        story.append(Paragraph("PROJECTS", section_style))
-        story.append(HRFlowable(width="100%", thickness=0.5, color=_RULE, spaceAfter=4))
-
-        for proj in assets.projects:
-            header_parts = [f"<b>{_escape(proj.name)}</b>"]
-            if proj.tech_stack:
-                header_parts.append(f"<i>{_escape(proj.tech_stack)}</i>")
-            story.append(Paragraph("  |  ".join(header_parts), role_title_style))
-
-            for bullet in proj.bullets:
-                story.append(Paragraph(f"• {_escape(bullet)}", bullet_style))
-
-    # ── Education ─────────────────────────────────────────────────────────────
-    if assets.education:
-        story.append(Paragraph("EDUCATION", section_style))
-        story.append(HRFlowable(width="100%", thickness=0.5, color=_RULE, spaceAfter=4))
-        story.append(Paragraph(_escape(assets.education), body_style))
-
-    doc.build(story)
-    return buffer.getvalue()
 
 
 def publish_to_s3(
@@ -213,10 +33,20 @@ def publish_to_s3(
     """
     Uploads 3 files to S3. Returns dict of {asset_type: s3_key}.
     S3 key structure: YYYY-MM-DD/CompanyName_RoleTitle/filename
+
+    Resume pipeline: patch master DOCX → LibreOffice/docx2pdf → upload PDF.
+    The CandidateProfile arg is retained for API compatibility with main.py
+    even though the renderer reads identity info directly from the master DOCX.
     """
+    del profile  # unused — master DOCX already carries the header/contact info
+
     bucket_name = os.getenv("AWS_S3_BUCKET")
     if not bucket_name:
         raise EnvironmentError("AWS_S3_BUCKET not set")
+    if not _MASTER_DOCX_PATH.exists():
+        raise FileNotFoundError(
+            f"Master DOCX not found at {_MASTER_DOCX_PATH} — required for rendering"
+        )
 
     s3 = boto3.client("s3")
     date_prefix = datetime.now().strftime("%Y-%m-%d")
@@ -226,8 +56,9 @@ def publish_to_s3(
 
     uploads = {}
 
-    # 1. Resume PDF
-    resume_bytes = _build_resume_pdf(assets, profile)
+    # 1. Resume PDF — patch master.docx in-memory, then convert to PDF.
+    docx_bytes = render_tailored_docx(assets, _MASTER_DOCX_PATH)
+    resume_bytes = convert_docx_to_pdf(docx_bytes)
     resume_key = f"{folder}/resume.pdf"
     s3.put_object(
         Bucket=bucket_name,

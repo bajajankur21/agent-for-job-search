@@ -16,21 +16,26 @@ class ExperienceEntry(BaseModel):
     title: str
     dates: str
     location: str
-    bullets: list[str]
+    bullets: list[str] = Field(
+        description="Bullets shaped as '**Lead-in:** body with **bold tech** and **bold metrics**.'"
+    )
 
 
-class ProjectEntry(BaseModel):
-    name: str
-    tech_stack: str
-    bullets: list[str]
+class EducationEntry(BaseModel):
+    institution: str
+    degree: str
+    date: str
+    bullets: list[str] = Field(description="Bullets with bold lead-ins, same shape as experience.")
 
 
 class TailoredAssets(BaseModel):
-    summary: str = Field(description="2-3 sentence professional summary tailored to this role")
-    experience: list[ExperienceEntry] = Field(description="Work experience entries with tailored bullets")
-    skills: dict[str, list[str]] = Field(description="Categorised skills, e.g. {'Languages': ['Python']}")
-    projects: list[ProjectEntry] = Field(description="Key projects from the master resume")
-    education: str = Field(description="Education line, e.g. 'B.Tech CS | BITS Pilani | 2022'")
+    experience: list[ExperienceEntry]
+    skills: dict[str, list[str]] = Field(
+        description="Exactly 4 keys: 'Languages & Backend', 'Frontend & Architecture', "
+                    "'Cloud & DevOps', 'Testing & Design'. JD-relevant items first."
+    )
+    interests: str = Field(description="Comma-separated interests line from master resume")
+    education: EducationEntry
     form_answers: dict = Field(description="Structured answers for common application form fields")
     job_title_used: str
     company_name_used: str
@@ -43,32 +48,29 @@ Never fabricate experience or invent numbers. Only amplify and reframe what exis
 
 
 # Tool schema mirrors TailoredAssets so Claude returns structured data directly.
-# Eliminates fragile JSON parsing, markdown fences, and preamble stripping.
+# Bullet shape: "**Lead-in:** body with **bold tech** and **bold metrics**."
+# The docx renderer splits on ** markers to create alternating bold/normal runs
+# that match the master resume's inline-emphasis pattern.
 TAILORING_TOOL = {
     "name": "produce_tailored_resume",
-    "description": "Produce a fully tailored resume, cover letter, and form answers for a specific job application. Always call this tool with all fields populated.",
+    "description": "Produce a fully tailored resume and form answers for a specific job application. Always call this tool with all fields populated.",
     "input_schema": {
         "type": "object",
         "properties": {
-            "summary": {
-                "type": "string",
-                "description": "2-3 sentence professional summary positioning the candidate for this specific role. Do NOT include the words 'tailored to' or 'tailored for'.",
-            },
             "experience": {
                 "type": "array",
+                "description": "One entry per role in the master resume, in the same order. Most recent role gets 5-6 bullets; older roles get 3 bullets.",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "company": {"type": "string"},
-                        "title": {"type": "string"},
-                        "dates": {"type": "string", "description": "e.g. Jan 2023 – Present"},
-                        "location": {"type": "string"},
+                        "company": {"type": "string", "description": "exact from master resume"},
+                        "title": {"type": "string", "description": "exact from master resume — do NOT promote, rename, or embellish"},
+                        "dates": {"type": "string", "description": "exact from master resume, e.g. 'Aug. 2023 – Present'"},
+                        "location": {"type": "string", "description": "exact from master resume"},
                         "bullets": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "minItems": 2,
-                            "maxItems": 3,
-                            "description": "2-3 achievement bullets reframed toward this JD. Action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers. Keep each bullet under ~20 words so the resume fits on one page.",
+                            "description": "Each bullet shaped as '**Lead-in Phrase:** body text with **bold tech names** and **bold metrics** from master resume.' Markdown ** markers must appear literally. Lead-in is 1-3 words ending in colon. NEVER invent numbers.",
                         },
                     },
                     "required": ["company", "title", "dates", "location", "bullets"],
@@ -76,31 +78,32 @@ TAILORING_TOOL = {
             },
             "skills": {
                 "type": "object",
-                "description": "3-4 skill categories (e.g. Languages, Frameworks, Tools & Cloud, Databases). Each value is a list of skill names. Highlight JD-relevant skills first.",
-                "additionalProperties": {"type": "array", "items": {"type": "string"}},
-            },
-            "projects": {
-                "type": "array",
-                "maxItems": 2,
-                "description": "Top 2 most JD-relevant projects from the master resume. Drop the rest to keep the resume on one page.",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "name": {"type": "string"},
-                        "tech_stack": {"type": "string", "description": "comma-separated tech stack"},
-                        "bullets": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "minItems": 1,
-                            "maxItems": 1,
-                        },
-                    },
-                    "required": ["name", "tech_stack", "bullets"],
+                "description": "Exactly 4 keys required, each an array of skills with JD-relevant items first.",
+                "properties": {
+                    "Languages & Backend": {"type": "array", "items": {"type": "string"}},
+                    "Frontend & Architecture": {"type": "array", "items": {"type": "string"}},
+                    "Cloud & DevOps": {"type": "array", "items": {"type": "string"}},
+                    "Testing & Design": {"type": "array", "items": {"type": "string"}},
                 },
+                "required": ["Languages & Backend", "Frontend & Architecture", "Cloud & DevOps", "Testing & Design"],
+            },
+            "interests": {
+                "type": "string",
+                "description": "Comma-separated interests line from master resume (may be trimmed, but do not invent).",
             },
             "education": {
-                "type": "string",
-                "description": "Single line: 'Degree | Institution | Graduation Year'",
+                "type": "object",
+                "properties": {
+                    "institution": {"type": "string"},
+                    "degree": {"type": "string"},
+                    "date": {"type": "string", "description": "e.g. 'July 2023'"},
+                    "bullets": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Same bold-lead-in shape as experience bullets. Copy master's education bullets; do not invent.",
+                    },
+                },
+                "required": ["institution", "degree", "date", "bullets"],
             },
             "form_answers": {
                 "type": "object",
@@ -122,7 +125,7 @@ TAILORING_TOOL = {
             "company_name_used": {"type": "string", "description": "exact company name from the listing"},
         },
         "required": [
-            "summary", "experience", "skills", "projects", "education",
+            "experience", "skills", "interests", "education",
             "form_answers", "job_title_used", "company_name_used",
         ],
     },
@@ -156,14 +159,17 @@ Total years of experience: {profile.total_yoe}
 Call the `produce_tailored_resume` tool with a complete tailored resume and application materials.
 
 Rules:
-- CRITICAL: The resume MUST fit on a single A4 page. Be ruthless — drop low-signal content rather than overflow.
-- CRITICAL: The candidate has exactly {profile.total_yoe} years of experience. Always use this exact number. Do NOT calculate, estimate, or round YOE from resume dates — use {profile.total_yoe} as-is.
-- Copy all experience entries EXACTLY as they appear in the master resume (company names, titles, dates, locations). Do NOT invent or omit any experience entry.
-- For each experience entry, write 2-3 achievement bullets reframed toward this specific JD. Each bullet under ~20 words. Action verbs + tech from JD + quantified impact from master resume. NEVER invent numbers.
-- The summary must be 2 concise sentences positioning me for THIS specific role.
-- Skills: group into 3-4 categories. Include JD-relevant skills first; trim less relevant ones.
-- Projects: include ONLY the top 2 projects from the master resume most relevant to this JD. Write 1 bullet per project. Drop the rest — single-page constraint takes priority over completeness.
-- Education: single line in format "Degree | Institution | Graduation Year".
+- R1. The candidate has EXACTLY {profile.total_yoe} years of experience. Use this number verbatim. Do NOT recompute from resume dates.
+- R2. Copy every experience entry from the master resume EXACTLY — same company, title, dates, location. Do NOT invent, omit, reorder, rename, promote, or merge entries.
+- R3. Bullet shape is mandatory: "**Lead-in Phrase:** body text with **bold tech names** and **bold metrics/numbers** copied from the master resume." Markdown ** markers must appear literally in the output string. Lead-in is 1-3 words ending in a colon.
+- R4. The MOST RECENT role has 5 or 6 bullets. Every older role has exactly 3 bullets. Drop low-signal master bullets on older roles; never invent new ones.
+- R5. Every bullet starts with a short bold lead-in, references tech or responsibilities from the target JD, and uses only numbers that appear in the master resume. NEVER invent numbers.
+- R6. `skills` has EXACTLY these 4 keys: "Languages & Backend", "Frontend & Architecture", "Cloud & DevOps", "Testing & Design". Each value is a non-empty array. JD-relevant items come first within each category.
+- R7. `interests` is a single comma-separated string copied from the master's Interests line (may be trimmed).
+- R8. `education` is a structured object: institution, degree, date, plus bullets that use the same bold-lead-in shape as experience.
+- R9. `form_answers` must reference exact titles from the master resume — do NOT promote, rename, or embellish titles (e.g. "Software Development Engineer" is NOT "Lead SDE").
+- R10. `job_title_used` = "{job.title}" and `company_name_used` = "{job.company}" — copy these exact strings.
+- R11. Target single A4 page density: 5-6 bullets on primary role, 3 on older roles, 4 skill categories fully populated.
 """
 
     model = os.getenv("MODEL_TAILORING") or "claude-sonnet-4-5-20250929"
@@ -250,13 +256,6 @@ def _wait_for_gemma_rpm_slot() -> None:
             _time.sleep(wait)
     _GEMMA_CALL_TIMES.append(_time.monotonic())
 
-class _GeminiSkills(BaseModel):
-    languages: list[str] = Field(description="Programming languages relevant to the JD")
-    frameworks: list[str] = Field(description="Frameworks and libraries relevant to the JD")
-    tools_and_cloud: list[str] = Field(description="Build tools, cloud platforms, infrastructure")
-    databases: list[str] = Field(description="SQL and NoSQL databases / storage systems")
-
-
 class _GeminiFormAnswers(BaseModel):
     describe_last_role: str
     describe_second_last_role: str
@@ -267,35 +266,31 @@ class _GeminiFormAnswers(BaseModel):
 
 
 class _GeminiTailoredAssets(BaseModel):
-    summary: str
     experience: list[ExperienceEntry]
-    skills: _GeminiSkills
-    projects: list[ProjectEntry]
-    education: str
+    skills: dict[str, list[str]]
+    interests: str
+    education: EducationEntry
     form_answers: _GeminiFormAnswers
     job_title_used: str
     company_name_used: str
 
 
-_GEMINI_SKILL_DISPLAY = {
-    "languages": "Languages",
-    "frameworks": "Frameworks",
-    "tools_and_cloud": "Tools & Cloud",
-    "databases": "Databases",
-}
+_REQUIRED_SKILL_KEYS = (
+    "Languages & Backend",
+    "Frontend & Architecture",
+    "Cloud & DevOps",
+    "Testing & Design",
+)
 
 
 def _gemini_to_tailored(raw: _GeminiTailoredAssets) -> TailoredAssets:
-    skills_dict = {
-        _GEMINI_SKILL_DISPLAY[key]: values
-        for key, values in raw.skills.model_dump().items()
-        if values
-    }
+    missing = [k for k in _REQUIRED_SKILL_KEYS if k not in raw.skills]
+    if missing:
+        raise ValueError(f"Gemma skills missing required keys: {missing}")
     return TailoredAssets(
-        summary=raw.summary,
         experience=raw.experience,
-        skills=skills_dict,
-        projects=raw.projects,
+        skills={k: raw.skills[k] for k in _REQUIRED_SKILL_KEYS},
+        interests=raw.interests,
         education=raw.education,
         form_answers=raw.form_answers.model_dump(),
         job_title_used=raw.job_title_used,
@@ -320,35 +315,36 @@ def _extract_json_object(text: str) -> str:
 
 
 _GEMMA_JSON_TEMPLATE = """{
-  "summary": "<exactly 2 sentences positioning the candidate for THIS role>",
   "experience": [
     {
-      "company": "<string, exact from master resume>",
-      "title": "<string, exact from master resume>",
-      "dates": "<e.g. Jan 2023 - Present, exact from master resume>",
-      "location": "<string, exact from master resume>",
-      "bullets": ["<bullet under 20 words>", "<bullet under 20 words>"]
+      "company": "<exact from master>",
+      "title": "<exact from master>",
+      "dates": "<exact from master>",
+      "location": "<exact from master>",
+      "bullets": [
+        "**Lead-in:** body with **bold tech** and **bold metrics** ...",
+        "**Lead-in:** ..."
+      ]
     }
   ],
   "skills": {
-    "languages": ["<lang>"],
-    "frameworks": ["<framework>"],
-    "tools_and_cloud": ["<tool>"],
-    "databases": ["<db>"]
+    "Languages & Backend": ["<skill>"],
+    "Frontend & Architecture": ["<skill>"],
+    "Cloud & DevOps": ["<skill>"],
+    "Testing & Design": ["<skill>"]
   },
-  "projects": [
-    {
-      "name": "<string>",
-      "tech_stack": "<comma-separated>",
-      "bullets": ["<single bullet>"]
-    }
-  ],
-  "education": "<Degree | Institution | Graduation Year>",
+  "interests": "<comma-separated from master>",
+  "education": {
+    "institution": "<string>",
+    "degree": "<string>",
+    "date": "<string>",
+    "bullets": ["**Leadership:** ...", "**Management:** ..."]
+  },
   "form_answers": {
     "describe_last_role": "<string>",
     "describe_second_last_role": "<string>",
     "why_this_company": "<string>",
-    "biggest_achievement": "<STAR-format>",
+    "biggest_achievement": "<STAR format>",
     "notice_period": "<string>",
     "expected_ctc": "<string>"
   },
@@ -406,17 +402,18 @@ Total years of experience: {profile.total_yoe}
 
 === HARD RULES — VIOLATING ANY OF THESE IS A FAILURE ===
 R1. Output is ONE JSON object. No text before {{. No text after }}. No ```json fences.
-R2. The candidate has EXACTLY {profile.total_yoe} years of experience. Use this number verbatim if you mention YOE anywhere. Do not recompute from dates.
-R3. Copy every experience entry from the master resume EXACTLY — same company, title, dates, location. Do not invent, omit, reorder, or merge entries.
-R4. Every experience bullet is under 20 words, starts with an action verb, and references tech or responsibilities from the target JD. Quantified impact only if the number appears in the master resume. NEVER invent numbers.
-R5. Each experience entry has 2 or 3 bullets — no more, no less.
-R6. `summary` is EXACTLY 2 sentences. Never use the phrases "tailored to", "tailored for", "seeking to", "passionate about".
-R7. `skills` has exactly these 4 keys: "languages", "frameworks", "tools_and_cloud", "databases". Each value is an array of strings. JD-relevant items first. Use [] for a category with nothing relevant — do NOT omit the key.
-R8. `projects` has EXACTLY 2 entries — the 2 most JD-relevant projects from the master resume. Each project has exactly 1 bullet. Drop the rest.
-R9. `education` is a single line: "Degree | Institution | Graduation Year".
-R10. `form_answers` has all 6 keys populated with non-empty strings: describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc.
-R11. `job_title_used` = "{job.title}" and `company_name_used` = "{job.company}" — copy these exact strings.
-R12. Total output must fit on a single A4 resume page when rendered. Be ruthless — drop low-signal content.
+R2. The candidate has EXACTLY {profile.total_yoe} years of experience. Do not recompute from dates.
+R3. Copy every experience entry from the master resume EXACTLY — same company, title, dates, location. Do not invent, omit, reorder, rename, promote, or merge entries.
+R4. Every experience bullet MUST follow this shape: "**Lead-in Phrase:** body text with **bold tech names** and **bold metrics/numbers** copied from the master resume." Markdown bold markers (**) must appear literally in the output string. Lead-in is 1-3 words ending in colon.
+R5. The MOST RECENT role has 5 or 6 bullets. Every older role has exactly 3 bullets. Drop low-signal master bullets on older roles; never invent new ones.
+R6. Every bullet references tech or responsibilities from the target JD, and uses only numbers that appear in the master resume. NEVER invent numbers.
+R7. Do NOT include a "summary" field or a "projects" field. The master resume has neither — the output must not either.
+R8. `skills` has EXACTLY these 4 keys: "Languages & Backend", "Frontend & Architecture", "Cloud & DevOps", "Testing & Design". Each value is a non-empty array. JD-relevant items first.
+R9. `interests` is a single comma-separated string copied from the master's Interests line (may be trimmed, but do not invent).
+R10. `education` is an object: {{ "institution": "...", "degree": "...", "date": "...", "bullets": ["**Leadership:** ...", "**Management:** ..."] }}. Bullets use the same bold-lead-in shape as R4.
+R11. `form_answers` has all 6 keys populated with non-empty strings: describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc. Reference exact titles from the master resume — do NOT promote, rename, or embellish titles.
+R12. `job_title_used` = "{job.title}" and `company_name_used` = "{job.company}" — copy these exact strings.
+R13. Total output must fit on a single A4 resume page. Target density: 5-6 bullets on primary role, 3 on older roles, 4 skill categories fully populated.
 
 === OUTPUT SCHEMA (fill every field with real content, not placeholders) ===
 {_GEMMA_JSON_TEMPLATE}

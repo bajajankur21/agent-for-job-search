@@ -44,7 +44,26 @@ The split is deliberate and drives most design decisions:
 - **Agent 1 (tailor)** — two-tier routing in `main.py`:
   - **Top `TOP_TIER_CLAUDE_COUNT` jobs** (default 6): Claude Sonnet with **prompt caching on the master resume** (`cache_control: ephemeral`). Cached once, reused across every Claude call in the run (5-minute TTL). Tool-use for structured `TailoredAssets` output.
   - **Long tail**: `run_tailor_gemini` → **Gemma 4 31B** on AI Studio free tier (15 RPM, **unlimited TPM/RPD**). A module-level sliding-window limiter in `agent_1.py` (`_wait_for_gemma_rpm_slot`) throttles to 14 RPM (configurable via `GEMMA_RPM_LIMIT`) so the daily run never trips the RPM ceiling. Gemma on AI Studio has **no JSON mode** (`response_schema` / `response_mime_type` are rejected: `"JSON mode is not enabled for models/gemma-*-it"`), so structure is driven entirely by a strict prompt + `_extract_json_object` parser + Pydantic validation, with retries for both rate-limit and JSON/schema failures.
-- **Agent 2 (publisher)** — ReportLab builds the resume PDF from `TailoredAssets`; boto3 uploads 3 files per job to S3 under `YYYY-MM-DD/Company_Title/{resume.pdf, form_answers.json, job_info.json}`.
+- **Agent 2 (publisher)** — `agents/docx_renderer.py` patches `data/master_resume.docx` at fixed paragraph anchor indices (see below), converts to PDF via docx2pdf/LibreOffice, then boto3 uploads 3 files per job to S3 under `YYYY-MM-DD/Company_Title/{resume.pdf, form_answers.json, job_info.json}`.
+
+### Resume renderer anchor map
+
+`agents/docx_renderer.py` rewrites only specific paragraphs by index — it never touches paragraph-level formatting (bullets, indentation, fonts). The anchor map is tied to the exact structure of `data/master_resume.docx`. **If you add/remove a bullet, role, or section from the master DOCX, re-run `scripts/inspect_master_docx.py` and update the map.**
+
+```python
+_ROLE_1_BULLETS = range(7, 12)       # P007–P011 (5 bullets, most-recent role)
+_ROLE_2_BULLETS = range(14, 17)      # P014–P016 (3 bullets, intern role)
+_EDUCATION_BULLETS = range(28, 30)   # P028–P029
+_SKILL_LINE_INDICES = {
+    "Languages & Backend": 32,
+    "Frontend & Architecture": 33,
+    "Cloud & DevOps": 34,
+    "Testing & Design": 35,
+}
+_INTERESTS_LINE = 36
+```
+
+The most-recent role has **exactly 5 bullet slots**. LLM prompts must request exactly 5 bullets for that role and exactly 3 for older roles. Smoke-test rendering with `python scripts/smoke_render.py` after any anchor or prompt change.
 
 ### Dedup (important)
 

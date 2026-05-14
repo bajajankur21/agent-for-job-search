@@ -41,8 +41,29 @@ The split is deliberate and drives most design decisions:
 - **Agent 0A (profiler)** — Claude Sonnet via **tool-use** (`produce_tailored_resume`-style forced tool call). Runs once per pipeline invocation.
 - **Agent 0B (scraper)** — `python-jobspy` hitting LinkedIn/Indeed/Glassdoor. Free, no API key. Each site is scraped separately per search term because LinkedIn honors `location` while Indeed needs `country_indeed`.
 - **Agent 0C (ranker)** — Gemini Flash Lite via **structured output** (`response_schema=list[_JobScore]`). A zero-cost Python hard filter (service-company blacklist, non-SDE title keywords, location check, regex YOE extraction) runs first so Gemini only scores survivors, in **one batched call** for all survivors.
-- **Agent 1 (tailor)** — Claude Sonnet with **prompt caching on the master resume** (`cache_control: ephemeral`). The master resume is the large, repeated block — it is cached once and reused across every job in the run (5-minute TTL). Uses tool-use for structured `TailoredAssets` output.
-- **Agent 2 (publisher)** — ReportLab builds the resume PDF from `TailoredAssets`; boto3 uploads 3 files per job to S3 under `YYYY-MM-DD/Company_Title/{resume.pdf, form_answers.json, job_info.json}`.
+- **Agent 1 (tailor)** — two-tier routing:
+  - **Top `TOP_TIER_CLAUDE_COUNT` jobs** (default 6): Claude Sonnet with **prompt caching on the master resume** (`cache_control: ephemeral`). Cached once, reused across every Claude call in the run (5-minute TTL). Tool-use for structured `TailoredAssets` output.
+  - **Long tail**: `run_tailor_gemini` → **Gemma 4 31B** on AI Studio free tier. No JSON mode — structure is driven by strict R-rules prompt + `_extract_json_object` parser + Pydantic validation. **R5: The MOST RECENT role has exactly 5 bullets. Every older role has exactly 3 bullets.**
+- **Agent 2 (publisher)** — `agents/docx_renderer.py` patches `data/master_resume.docx` at fixed paragraph anchor indices (see below), converts to PDF via docx2pdf/LibreOffice, then boto3 uploads 3 files per job to S3 under `YYYY-MM-DD/Company_Title/{resume.pdf, form_answers.json, job_info.json}`.
+
+### Resume renderer anchor map
+
+`agents/docx_renderer.py` rewrites only specific paragraphs by index — paragraph-level formatting (bullets, indentation, fonts) is never touched. The anchor map is tied to the exact structure of `data/master_resume.docx`. **If you add/remove a bullet, role, or section from the master DOCX, re-run `scripts/inspect_master_docx.py` and update the map.**
+
+```python
+_ROLE_1_BULLETS = range(7, 12)       # P007–P011 (5 bullets, most-recent role)
+_ROLE_2_BULLETS = range(14, 17)      # P014–P016 (3 bullets, intern role)
+_EDUCATION_BULLETS = range(28, 30)   # P028–P029
+_SKILL_LINE_INDICES = {
+    "Languages & Backend": 32,
+    "Frontend & Architecture": 33,
+    "Cloud & DevOps": 34,
+    "Testing & Design": 35,
+}
+_INTERESTS_LINE = 36
+```
+
+The most-recent role has **exactly 5 bullet slots**. Gemma R-rules must request exactly 5 bullets for that role and exactly 3 for older roles. Smoke-test rendering with `python scripts/smoke_render.py` after any anchor or prompt change.
 
 ### Dedup (important)
 

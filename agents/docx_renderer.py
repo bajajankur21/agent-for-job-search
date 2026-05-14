@@ -28,16 +28,16 @@ logger = logging.getLogger(__name__)
 # Produced by scripts/inspect_master_docx.py. These are stable as long as the
 # master resume structure doesn't change (same number of roles + bullets). If
 # you add/remove a role or bullet in the master, update these ranges.
-_ROLE_1_BULLETS = range(7, 13)      # P007–P012 (6 bullets, most-recent role)
-_ROLE_2_BULLETS = range(15, 18)     # P015–P017 (3 bullets, older role)
-_EDUCATION_BULLETS = range(22, 24)  # P022–P023
+_ROLE_1_BULLETS = range(7, 12)       # P007–P011 (5 bullets, most-recent role)
+_ROLE_2_BULLETS = range(14, 17)      # P014–P016 (3 bullets, intern role)
+_EDUCATION_BULLETS = range(28, 30)   # P028–P029
 _SKILL_LINE_INDICES = {
-    "Languages & Backend": 26,
-    "Frontend & Architecture": 27,
-    "Cloud & DevOps": 28,
-    "Testing & Design": 29,
+    "Languages & Backend": 32,
+    "Frontend & Architecture": 33,
+    "Cloud & DevOps": 34,
+    "Testing & Design": 35,
 }
-_INTERESTS_LINE = 30
+_INTERESTS_LINE = 36
 
 # Body font used throughout — matches master's run-level formatting.
 _BODY_FONT_NAME = "Garamond"

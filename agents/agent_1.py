@@ -59,7 +59,7 @@ TAILORING_TOOL = {
         "properties": {
             "experience": {
                 "type": "array",
-                "description": "One entry per role in the master resume, in the same order. Most recent role gets 5-6 bullets; older roles get 3 bullets.",
+                "description": "One entry per role in the master resume, in the same order. Most recent role gets exactly 5 bullets; older roles get 3 bullets.",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -162,14 +162,14 @@ Rules:
 - R1. The candidate has EXACTLY {profile.total_yoe} years of experience. Use this number verbatim. Do NOT recompute from resume dates.
 - R2. Copy every experience entry from the master resume EXACTLY — same company, title, dates, location. Do NOT invent, omit, reorder, rename, promote, or merge entries.
 - R3. Bullet shape is mandatory: "**Lead-in Phrase:** body text with **bold tech names** and **bold metrics/numbers** copied from the master resume." Markdown ** markers must appear literally in the output string. Lead-in is 1-3 words ending in a colon.
-- R4. The MOST RECENT role has 5 or 6 bullets. Every older role has exactly 3 bullets. Drop low-signal master bullets on older roles; never invent new ones.
+- R4. The MOST RECENT role has exactly 5 bullets. Every older role has exactly 3 bullets. Drop low-signal master bullets on older roles; never invent new ones.
 - R5. Every bullet starts with a short bold lead-in, references tech or responsibilities from the target JD, and uses only numbers that appear in the master resume. NEVER invent numbers.
 - R6. `skills` has EXACTLY these 4 keys: "Languages & Backend", "Frontend & Architecture", "Cloud & DevOps", "Testing & Design". Each value is a non-empty array. JD-relevant items come first within each category.
 - R7. `interests` is a single comma-separated string copied from the master's Interests line (may be trimmed).
 - R8. `education` is a structured object: institution, degree, date, plus bullets that use the same bold-lead-in shape as experience.
 - R9. `form_answers` must reference exact titles from the master resume — do NOT promote, rename, or embellish titles (e.g. "Software Development Engineer" is NOT "Lead SDE").
 - R10. `job_title_used` = "{job.title}" and `company_name_used` = "{job.company}" — copy these exact strings.
-- R11. Target single A4 page density: 5-6 bullets on primary role, 3 on older roles, 4 skill categories fully populated.
+- R11. Target single A4 page density: exactly 5 bullets on primary role, 3 on older roles, 4 skill categories fully populated.
 """
 
     model = os.getenv("MODEL_TAILORING") or "claude-sonnet-4-5-20250929"
@@ -405,7 +405,7 @@ R1. Output is ONE JSON object. No text before {{. No text after }}. No ```json f
 R2. The candidate has EXACTLY {profile.total_yoe} years of experience. Do not recompute from dates.
 R3. Copy every experience entry from the master resume EXACTLY — same company, title, dates, location. Do not invent, omit, reorder, rename, promote, or merge entries.
 R4. Every experience bullet MUST follow this shape: "**Lead-in Phrase:** body text with **bold tech names** and **bold metrics/numbers** copied from the master resume." Markdown bold markers (**) must appear literally in the output string. Lead-in is 1-3 words ending in colon.
-R5. The MOST RECENT role has 5 or 6 bullets. Every older role has exactly 3 bullets. Drop low-signal master bullets on older roles; never invent new ones.
+R5. The MOST RECENT role has exactly 5 bullets. Every older role has exactly 3 bullets. Drop low-signal master bullets on older roles; never invent new ones.
 R6. Every bullet references tech or responsibilities from the target JD, and uses only numbers that appear in the master resume. NEVER invent numbers.
 R7. Do NOT include a "summary" field or a "projects" field. The master resume has neither — the output must not either.
 R8. `skills` has EXACTLY these 4 keys: "Languages & Backend", "Frontend & Architecture", "Cloud & DevOps", "Testing & Design". Each value is a non-empty array. JD-relevant items first.
@@ -413,7 +413,7 @@ R9. `interests` is a single comma-separated string copied from the master's Inte
 R10. `education` is an object: {{ "institution": "...", "degree": "...", "date": "...", "bullets": ["**Leadership:** ...", "**Management:** ..."] }}. Bullets use the same bold-lead-in shape as R4.
 R11. `form_answers` has all 6 keys populated with non-empty strings: describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc. Reference exact titles from the master resume — do NOT promote, rename, or embellish titles.
 R12. `job_title_used` = "{job.title}" and `company_name_used` = "{job.company}" — copy these exact strings.
-R13. Total output must fit on a single A4 resume page. Target density: 5-6 bullets on primary role, 3 on older roles, 4 skill categories fully populated.
+R13. Total output must fit on a single A4 resume page. Target density: exactly 5 bullets on primary role, 3 on older roles, 4 skill categories fully populated.
 
 === OUTPUT SCHEMA (fill every field with real content, not placeholders) ===
 {_GEMMA_JSON_TEMPLATE}

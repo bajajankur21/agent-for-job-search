@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/inspect_master_docx.py)",
+      "Bash(python scripts/smoke_render.py)"
+    ]
+  }
+}

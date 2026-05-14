@@ -55,6 +55,20 @@ SERVICE_COMPANY_BLACKLIST = {
     "kellton tech",
 }
 
+# ── Personal exclusion list ───────────────────────────────────────────────────
+# Exact lowercase company names to skip (current employer, companies with offers).
+EXCLUDED_COMPANIES: set[str] = {
+    "philips",                  # current employer
+    "ge healthcare",            # offer in hand
+}
+
+# Prefix patterns (lowercase) — any company whose name starts with one of these
+# is excluded. Handles "GE Healthcare", "GE Digital", "GE Vernova", etc.
+EXCLUDED_COMPANY_PREFIXES: tuple[str, ...] = (
+    "ge ",      # "ge digital", "ge vernova", …
+    "ge-",      # hyphenated variants
+)
+
 NON_SDE_TITLE_KEYWORDS = {
     "marketing", "sales", "finance", "accounting", "hr ", "human resource",
     "recruiter", "talent", "analyst", "business development", "bd ",
@@ -140,7 +154,13 @@ def _passes_hard_filter(job: JobListing, profile: CandidateProfile) -> tuple[boo
     if company_lower in SERVICE_COMPANY_BLACKLIST:
         return False, f"Service company: {job.company}"
 
-    # 3. Location must be Bengaluru or Remote
+    # 3. Personal exclusion list (current employer + companies with existing offers)
+    if company_lower in EXCLUDED_COMPANIES:
+        return False, f"Excluded company: {job.company}"
+    if company_lower.startswith(EXCLUDED_COMPANY_PREFIXES):
+        return False, f"Excluded company (prefix match): {job.company}"
+
+    # 4. Location must be Bengaluru or Remote
     loc_lower = job.location.lower()
     location_ok = any(
         term in loc_lower
@@ -149,7 +169,7 @@ def _passes_hard_filter(job: JobListing, profile: CandidateProfile) -> tuple[boo
     if not location_ok:
         return False, f"Location not Bengaluru/Remote: '{job.location}'"
 
-    # 4. Description must mention at least one of the candidate's technical keywords
+    # 5. Description must mention at least one of the candidate's technical keywords
     desc_lower = job.description.lower()
     tech_anchor_found = any(
         skill.lower() in desc_lower
@@ -158,7 +178,7 @@ def _passes_hard_filter(job: JobListing, profile: CandidateProfile) -> tuple[boo
     if not tech_anchor_found:
         return False, "No technical keywords found in description"
 
-    # 5. YOE pre-filter — drop clearly over-levelled jobs before Gemini sees them
+    # 6. YOE pre-filter — drop clearly over-levelled jobs before Gemini sees them
     yoe = _regex_min_yoe(job)
     if yoe is not None and yoe > profile.max_yoe_applying_for:
         return False, f"Over-levelled: regex found {yoe} YOE > threshold {profile.max_yoe_applying_for}"

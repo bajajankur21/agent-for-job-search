@@ -17,6 +17,7 @@ from agents.agent_0a_profiler import (
     CandidateProfile,
     extract_text_from_pdf,
     PROFILE_EXTRACTION_PROMPT,
+    build_candidate_profile as _build_candidate_profile_gemma,
 )
 from agents.agent_1 import run_tailor_gemini  # noqa: F401 — re-export for test_pipeline.py
 
@@ -50,40 +51,13 @@ def _extract_json(raw: str, array: bool = False) -> str:
 # ── Agent 0A override: Profiler via Gemini ────────────────────────────────────
 
 def build_candidate_profile_gemini(resume_pdf_path: str) -> CandidateProfile:
-    """Same as agent_0a_profiler.build_candidate_profile but uses Gemini Flash."""
-    logger.info(f"[GEMINI OVERRIDE] Extracting text from resume: {resume_pdf_path}")
-    resume_text = extract_text_from_pdf(resume_pdf_path)
-    logger.info(f"Extracted {len(resume_text)} characters from PDF")
+    """Deprecated alias — production build_candidate_profile is now Gemma-based.
 
-    from datetime import date
-    model = _get_gemini_model("MODEL_PROFILER_GEMINI")
-    today_date = date.today().strftime("%B %d, %Y")
-    prompt = PROFILE_EXTRACTION_PROMPT.format(resume_text=resume_text, today_date=today_date)
-
-    logger.info("[GEMINI OVERRIDE] Building candidate profile with Gemini Flash (structured output)...")
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.GenerationConfig(
-            temperature=0.0,
-            max_output_tokens=4096,
-            response_mime_type="application/json",
-            response_schema=CandidateProfile,
-        ),
-    )
-
-    try:
-        data = json.loads(response.text)
-        profile = CandidateProfile(**data)
-    except Exception as e:
-        logger.error(f"Profile extraction failed: {e}\nRaw response: {response.text[:500]}")
-        raise ValueError(f"Could not parse candidate profile: {e}")
-
-    logger.info(
-        f"Profile built: {profile.full_name} | "
-        f"{profile.total_yoe} YOE | {profile.seniority} | "
-        f"Keywords: {profile.search_keywords}"
-    )
-    return profile
+    Kept so test_pipeline.py imports keep working; routes straight through to
+    the production builder (gemma-4-31b-it with gemma-3-27b-it fallback).
+    """
+    logger.info("[GEMINI OVERRIDE] Routing to production Gemma profiler.")
+    return _build_candidate_profile_gemma(resume_pdf_path)
 
 
 # Agent 1 tailor override now lives in agents/agent_1.py as run_tailor_gemini

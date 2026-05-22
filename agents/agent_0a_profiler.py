@@ -4,7 +4,6 @@ import logging
 from typing import Optional
 from pathlib import Path
 
-import anthropic
 import PyPDF2
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -82,8 +81,31 @@ def extract_text_from_pdf(pdf_path: str) -> str:
     return "\n".join(text_parts)
 
 
+_PROFILE_JSON_TEMPLATE = """{
+  "full_name": "<string>",
+  "current_title": "<string>",
+  "total_yoe": <number>,
+  "core_skills": ["<skill>"],
+  "frameworks": ["<framework>"],
+  "domains": ["<domain>"],
+  "seniority": "junior | mid | senior | staff",
+  "companies": ["<company>"],
+  "education": "<string or null>",
+  "email": "<string or null>",
+  "phone": "<string or null>",
+  "linkedin": "<string or null>",
+  "github": "<string or null>",
+  "location_city": "<string or null>",
+  "preferred_locations": ["Bengaluru", "Remote"],
+  "company_type_preference": "product | service | both",
+  "max_yoe_applying_for": <integer>,
+  "search_keywords": ["<8-12 short keywords>"],
+  "raw_summary": "<one paragraph summary>"
+}"""
+
+
 PROFILE_EXTRACTION_PROMPT = """
-You are an expert technical recruiter. Extract a structured candidate profile from the resume text below by calling the `extract_candidate_profile` tool.
+You are an expert technical recruiter. Extract a structured candidate profile from the resume text below.
 
 Today's date is: {today_date}
 
@@ -97,84 +119,66 @@ Rules:
 - For preferred_locations: default to ["Bengaluru", "Remote"] unless other locations are stated.
 - For max_yoe_applying_for: set to total_yoe + 1, capped at 3 (must always be < 4 to filter out 4-6 YOE jobs).
 
+Output rules:
+- Output ONE JSON object only. No prose, no markdown fences. Start with {{ and end with }}.
+- Every field in the schema must be present. Use null only where the schema allows it.
+- search_keywords must contain 8 to 12 short keywords (1-3 words each).
+
+Schema (fill every field with real content, not placeholders):
+{json_template}
+
 Resume text:
 ---
 {resume_text}
 ---
 """
 
-# Tool schema for Claude — forces the model to return structured data matching CandidateProfile.
-# This eliminates fragile JSON parsing entirely.
-PROFILE_EXTRACTION_TOOL = {
-    "name": "extract_candidate_profile",
-    "description": "Extract a structured candidate profile from a resume. Always call this tool with all fields populated.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "full_name": {"type": "string"},
-            "current_title": {"type": "string"},
-            "total_yoe": {"type": "number", "description": "Total years of experience including internships, rounded to nearest 0.5"},
-            "core_skills": {"type": "array", "items": {"type": "string"}},
-            "frameworks": {"type": "array", "items": {"type": "string"}},
-            "domains": {"type": "array", "items": {"type": "string"}},
-            "seniority": {"type": "string", "enum": ["junior", "mid", "senior", "staff"]},
-            "companies": {"type": "array", "items": {"type": "string"}},
-            "education": {"type": ["string", "null"]},
-            "email": {"type": ["string", "null"]},
-            "phone": {"type": ["string", "null"]},
-            "linkedin": {"type": ["string", "null"]},
-            "github": {"type": ["string", "null"]},
-            "location_city": {"type": ["string", "null"]},
-            "preferred_locations": {"type": "array", "items": {"type": "string"}},
-            "company_type_preference": {"type": "string", "enum": ["product", "service", "both"]},
-            "max_yoe_applying_for": {"type": "integer"},
-            "search_keywords": {"type": "array", "items": {"type": "string"}, "minItems": 8, "maxItems": 12},
-            "raw_summary": {"type": "string", "description": "One paragraph professional summary"},
-        },
-        "required": [
-            "full_name", "current_title", "total_yoe", "core_skills", "frameworks",
-            "domains", "seniority", "companies", "preferred_locations",
-            "company_type_preference", "max_yoe_applying_for", "search_keywords", "raw_summary"
-        ],
-    },
-}
-
 
 def build_candidate_profile(resume_pdf_path: str) -> CandidateProfile:
     """
-    Main entry point. Reads PDF, calls Claude, returns validated profile.
-    This is called once per pipeline run — not once per job.
+    Main entry point. Reads the PDF, asks Gemma (primary gemma-4-31b-it, fallback
+    gemma-3-27b-it) for a structured profile, validates with Pydantic, returns it.
+    Called once per pipeline run — not once per job.
     """
+    # Local import avoids the agent_1 → agent_0a circular at module load time.
+    from agents.agent_1 import gemma_generate, _extract_json_object
+    from pydantic import ValidationError
+
     logger.info(f"Extracting text from resume: {resume_pdf_path}")
     resume_text = extract_text_from_pdf(resume_pdf_path)
     logger.info(f"Extracted {len(resume_text)} characters from PDF")
 
-    client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
     from datetime import date
     today_date = date.today().strftime("%B %d, %Y")
-    prompt = PROFILE_EXTRACTION_PROMPT.format(resume_text=resume_text, today_date=today_date)
-
-    model = os.getenv("MODEL_PROFILER") or "claude-sonnet-4-5-20250929"
-    logger.info(f"Building candidate profile with {model} (tool-use mode)...")
-    response = client.messages.create(
-        model=model,
-        max_tokens=2048,
-        tools=[PROFILE_EXTRACTION_TOOL],
-        tool_choice={"type": "tool", "name": "extract_candidate_profile"},
-        messages=[{"role": "user", "content": prompt}],
+    prompt = PROFILE_EXTRACTION_PROMPT.format(
+        resume_text=resume_text,
+        today_date=today_date,
+        json_template=_PROFILE_JSON_TEMPLATE,
     )
 
-    # Tool use response — Claude returns the extracted data as a structured dict, no JSON parsing needed.
-    tool_use_block = next((b for b in response.content if b.type == "tool_use"), None)
-    if tool_use_block is None:
-        raise ValueError(f"Claude did not return a tool_use block. Got: {response.content}")
+    logger.info("Building candidate profile with Gemma (prompt-driven JSON)...")
 
-    try:
-        profile = CandidateProfile(**tool_use_block.input)
-    except Exception as e:
-        logger.error(f"Profile validation failed: {e}\nInput: {tool_use_block.input}")
-        raise ValueError(f"Could not validate candidate profile: {e}")
+    last_err: Exception | None = None
+    last_raw = ""
+    for attempt in range(3):
+        try:
+            last_raw = gemma_generate(
+                prompt,
+                max_output_tokens=2048,
+                temperature=0.0,
+                label="profiler",
+            )
+            data = json.loads(_extract_json_object(last_raw))
+            profile = CandidateProfile(**data)
+            break
+        except (json.JSONDecodeError, ValidationError, ValueError) as e:
+            last_err = e
+            if attempt == 2:
+                logger.error(f"Profile extraction failed: {e}\nRaw response: {last_raw[:500]}")
+                raise ValueError(f"Could not validate candidate profile after 3 attempts: {e}")
+            logger.warning(f"Profile JSON invalid, retrying ({attempt + 1}/3): {e}")
+    else:
+        raise RuntimeError(f"Unexpected fallthrough in build_candidate_profile: {last_err}")
 
     logger.info(
         f"Profile built: {profile.full_name} | "

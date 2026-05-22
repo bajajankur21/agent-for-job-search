@@ -1,14 +1,103 @@
 import os
+import json
+import time
 import logging
+from collections import deque
 from pydantic import BaseModel, Field
-from anthropic import Anthropic
 from dotenv import load_dotenv
 from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
 
 load_dotenv()
 logger = logging.getLogger(__name__)
-client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+# ── Shared Gemma client (primary + fallback) ─────────────────────────────────
+# Every LLM call in the pipeline now goes through Gemma on AI Studio. Primary
+# model is gemma-4-31b-it (unlimited TPM/RPD, 15 RPM). On primary failure we
+# fall back to gemma-3-27b-it (30 RPM, 14.4K RPD ceiling). Both models share
+# the same RPM throttle window since they share project quota.
+
+_PRIMARY_MODEL_ENV = "MODEL_TAILORING_GEMINI"
+_PRIMARY_MODEL_DEFAULT = "gemma-4-31b-it"
+_FALLBACK_MODEL_ENV = "MODEL_FALLBACK_GEMINI"
+_FALLBACK_MODEL_DEFAULT = "gemma-3-27b-it"
+
+_GEMMA_CALL_TIMES: deque = deque()
+
+
+def _wait_for_gemma_rpm_slot() -> None:
+    """Block until a new request would stay under the rolling-60s RPM ceiling."""
+    limit = int(os.getenv("GEMMA_RPM_LIMIT", "14"))
+    now = time.monotonic()
+    while _GEMMA_CALL_TIMES and now - _GEMMA_CALL_TIMES[0] > 60:
+        _GEMMA_CALL_TIMES.popleft()
+    if len(_GEMMA_CALL_TIMES) >= limit:
+        wait = 60 - (now - _GEMMA_CALL_TIMES[0]) + 0.5
+        if wait > 0:
+            logger.info(
+                f"Gemma RPM ceiling reached ({limit}/min) — pausing {wait:.1f}s before next call"
+            )
+            time.sleep(wait)
+    _GEMMA_CALL_TIMES.append(time.monotonic())
+
+
+def gemma_generate(
+    prompt: str,
+    max_output_tokens: int = 4096,
+    temperature: float = 0.2,
+    label: str = "gemma",
+) -> str:
+    """Call Gemma with primary model, fall back to secondary on failure.
+
+    Tries MODEL_TAILORING_GEMINI (default gemma-4-31b-it) first; on
+    ResourceExhausted (after a single 60s retry) or any other exception,
+    falls back to MODEL_FALLBACK_GEMINI (default gemma-3-27b-it). RPM
+    throttle is applied on every attempt.
+
+    Gemma on AI Studio does NOT support JSON mode (response_schema /
+    response_mime_type are rejected), so callers must enforce JSON shape
+    via prompt + a robust extractor on the returned string.
+    """
+    import google.generativeai as genai
+    from google.api_core.exceptions import ResourceExhausted
+
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise EnvironmentError("GEMINI_API_KEY not set — required for Gemma calls")
+    genai.configure(api_key=api_key)
+
+    primary = os.getenv(_PRIMARY_MODEL_ENV) or _PRIMARY_MODEL_DEFAULT
+    fallback = os.getenv(_FALLBACK_MODEL_ENV) or _FALLBACK_MODEL_DEFAULT
+
+    gen_config = genai.GenerationConfig(
+        temperature=temperature,
+        max_output_tokens=max_output_tokens,
+    )
+
+    # Primary: gemma-4-31b-it, up to 2 attempts (one retry on rate limit).
+    for attempt in range(2):
+        try:
+            _wait_for_gemma_rpm_slot()
+            logger.info(f"[{label}] calling {primary} (attempt {attempt + 1}/2)")
+            model = genai.GenerativeModel(primary)
+            response = model.generate_content(prompt, generation_config=gen_config)
+            return response.text
+        except ResourceExhausted as e:
+            if attempt == 0:
+                logger.warning(f"[{label}] {primary} rate-limited, retrying in 60s: {e}")
+                time.sleep(60)
+                continue
+            logger.warning(f"[{label}] {primary} rate-limited twice, falling back to {fallback}")
+        except Exception as e:
+            logger.warning(f"[{label}] {primary} failed ({type(e).__name__}: {e}); falling back to {fallback}")
+            break
+
+    # Fallback: gemma-3-27b-it.
+    _wait_for_gemma_rpm_slot()
+    logger.info(f"[{label}] calling fallback {fallback}")
+    model = genai.GenerativeModel(fallback)
+    response = model.generate_content(prompt, generation_config=gen_config)
+    return response.text
 
 
 class ExperienceEntry(BaseModel):
@@ -47,11 +136,10 @@ Your output is always precise, achievement-oriented, and passes ATS scanners.
 Never fabricate experience or invent numbers. Only amplify and reframe what exists in the master resume."""
 
 
-# Tool schema mirrors TailoredAssets so Claude returns structured data directly.
-# Bullet shape: "**Lead-in:** body with **bold tech** and **bold metrics**."
-# The docx renderer splits on ** markers to create alternating bold/normal runs
-# that match the master resume's inline-emphasis pattern.
-TAILORING_TOOL = {
+# Legacy Claude tool schema. Unused now that every tailor call goes through
+# Gemma (no JSON mode → prompt-driven JSON below), but kept as documentation
+# of the canonical TailoredAssets shape.
+_LEGACY_TAILORING_TOOL = {
     "name": "produce_tailored_resume",
     "description": "Produce a fully tailored resume and form answers for a specific job application. Always call this tool with all fields populated.",
     "input_schema": {
@@ -131,130 +219,6 @@ TAILORING_TOOL = {
     },
 }
 
-
-def run_tailor(
-    job: JobListing,
-    profile: CandidateProfile,
-    master_resume_text: str
-) -> TailoredAssets:
-    """
-    Calls Claude with prompt caching on the master resume and tool-use for structured output.
-    Cache hit on all calls after the first within the 5-minute window.
-    """
-
-    user_prompt = f"""
-Here is the job I am applying to:
-
-Company: {job.company}
-Role: {job.title}
-Location: {job.location}
-Job Description:
----
-{job.description}
----
-
-My candidate profile summary: {profile.raw_summary}
-Total years of experience: {profile.total_yoe}
-
-Call the `produce_tailored_resume` tool with a complete tailored resume and application materials.
-
-Rules:
-- R1. The candidate has EXACTLY {profile.total_yoe} years of experience. Use this number verbatim. Do NOT recompute from resume dates.
-- R2. Copy every experience entry from the master resume EXACTLY — same company, title, dates, location. Do NOT invent, omit, reorder, rename, promote, or merge entries.
-- R3. Bullet shape is mandatory: "**Lead-in Phrase:** body text with **bold tech names** and **bold metrics/numbers** copied from the master resume." Markdown ** markers must appear literally in the output string. Lead-in is 1-3 words ending in a colon.
-- R4. The MOST RECENT role has exactly 5 bullets. Every older role has exactly 3 bullets. Drop low-signal master bullets on older roles; never invent new ones.
-- R5. Every bullet starts with a short bold lead-in, references tech or responsibilities from the target JD, and uses only numbers that appear in the master resume. NEVER invent numbers.
-- R6. `skills` has EXACTLY these 4 keys: "Languages & Backend", "Frontend & Architecture", "Cloud & DevOps", "Testing & Design". Each value is a non-empty array. JD-relevant items come first within each category.
-- R7. `interests` is a single comma-separated string copied from the master's Interests line (may be trimmed).
-- R8. `education` is a structured object: institution, degree, date, plus bullets that use the same bold-lead-in shape as experience.
-- R9. `form_answers` must reference exact titles from the master resume — do NOT promote, rename, or embellish titles (e.g. "Software Development Engineer" is NOT "Lead SDE").
-- R10. `job_title_used` = "{job.title}" and `company_name_used` = "{job.company}" — copy these exact strings.
-- R11. Target single A4 page density: exactly 5 bullets on primary role, 3 on older roles, 4 skill categories fully populated.
-"""
-
-    model = os.getenv("MODEL_TAILORING") or "claude-sonnet-4-5-20250929"
-    logger.info(f"Calling {model} for tailoring: '{job.title}' @ {job.company} (tool-use mode)")
-
-    response = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        system=SYSTEM_PROMPT,
-        tools=[TAILORING_TOOL],
-        tool_choice={"type": "tool", "name": "produce_tailored_resume"},
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": f"Here is my complete master resume for reference:\n\n{master_resume_text}",
-                        "cache_control": {"type": "ephemeral"}
-                    },
-                    {
-                        "type": "text",
-                        "text": user_prompt
-                    }
-                ]
-            }
-        ]
-    )
-
-    usage = response.usage
-    logger.info(
-        f"Token usage — input: {usage.input_tokens}, "
-        f"output: {usage.output_tokens}, "
-        f"cache_read: {getattr(usage, 'cache_read_input_tokens', 0)}, "
-        f"cache_write: {getattr(usage, 'cache_creation_input_tokens', 0)}"
-    )
-
-    tool_use_block = next((b for b in response.content if b.type == "tool_use"), None)
-    if tool_use_block is None:
-        raise ValueError(f"Claude did not return a tool_use block for '{job.title}'. Got: {response.content}")
-
-    try:
-        return TailoredAssets(**tool_use_block.input)
-    except Exception as e:
-        logger.error(f"Tailor validation failed for '{job.title}': {e}\nInput: {tool_use_block.input}")
-        raise ValueError(f"Could not validate tailored assets for '{job.title}': {e}")
-
-
-# ── Gemma tier for long-tail jobs ────────────────────────────────────────────
-# Top-scored jobs go through run_tailor (Claude Sonnet, cached master resume).
-# Lower-scored jobs go through run_tailor_gemini → Gemma 4 31B on AI Studio
-# (free tier: 15 RPM, UNLIMITED TPM, UNLIMITED RPD). We self-throttle to 14
-# RPM (sliding window) to stay one below the ceiling; with no daily cap, the
-# only pacing constraint is per-minute. For ~40 jobs this adds ~3 min of
-# total wall-clock. `gemma-3-27b-it` also works if the user prefers it
-# (higher RPM, lower RPD ceiling) — set MODEL_TAILORING_GEMINI to override.
-#
-# Gemma on AI Studio does NOT support response_schema or response_mime_type
-# (JSON mode is disabled: "JSON mode is not enabled for models/gemma-*-it").
-# So we drive the JSON shape purely through a strict prompt + robust parser,
-# and validate with Pydantic. Fixed-key `_GeminiSkills` + `_GeminiFormAnswers`
-# are retained because a literal-key schema is easier for the model to hit.
-
-# Sliding-window RPM limiter shared across all run_tailor_gemini calls in the
-# process. Module-level so it persists across the per-job loop in main.py.
-from collections import deque as _deque
-import time as _time
-
-_GEMMA_CALL_TIMES: _deque = _deque()
-
-
-def _wait_for_gemma_rpm_slot() -> None:
-    """Block until a new request would stay under the rolling-60s RPM ceiling."""
-    limit = int(os.getenv("GEMMA_RPM_LIMIT", "14"))
-    now = _time.monotonic()
-    while _GEMMA_CALL_TIMES and now - _GEMMA_CALL_TIMES[0] > 60:
-        _GEMMA_CALL_TIMES.popleft()
-    if len(_GEMMA_CALL_TIMES) >= limit:
-        wait = 60 - (now - _GEMMA_CALL_TIMES[0]) + 0.5
-        if wait > 0:
-            logger.info(
-                f"Gemma RPM ceiling reached ({limit}/min) — pausing {wait:.1f}s before next call"
-            )
-            _time.sleep(wait)
-    _GEMMA_CALL_TIMES.append(_time.monotonic())
 
 class _GeminiFormAnswers(BaseModel):
     describe_last_role: str
@@ -358,26 +322,14 @@ def run_tailor_gemini(
     profile: CandidateProfile,
     master_resume_text: str,
 ) -> TailoredAssets:
-    """Gemma 4 31B variant of run_tailor — long-tail tier on AI Studio free quota.
+    """Tailor a single job's assets via Gemma (primary gemma-4-31b-it, fallback gemma-3-27b-it).
 
     Uses prompt-enforced JSON + robust parser because Gemma on AI Studio does
-    not expose JSON mode / response_schema. Client-side RPM throttle keeps us
-    under the 15/min ceiling (unlimited RPD on Gemma 4). Retries on rate-limit
-    AND on JSON/schema validation failures (the model usually recovers on
-    retry once it sees that its first output was malformed).
+    not expose JSON mode / response_schema. Retries on JSON/schema validation
+    failures — the model usually recovers on retry. Per-attempt model fallback
+    (4-31b → 3-27b) is handled inside ``gemma_generate``.
     """
-    import json
-    import time
-    import google.generativeai as genai
-    from google.api_core.exceptions import ResourceExhausted
     from pydantic import ValidationError
-
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise EnvironmentError("GEMINI_API_KEY not set — required for Gemma tailor tier")
-    genai.configure(api_key=api_key)
-    model_name = os.getenv("MODEL_TAILORING_GEMINI") or "gemma-4-31b-it"
-    model = genai.GenerativeModel(model_name)
 
     prompt = f"""You are an expert technical resume writer and career coach. You tailor resumes to specific job descriptions. Your output is precise, achievement-oriented, and passes ATS scanners. You never fabricate experience or invent numbers — you only amplify and reframe what exists in the master resume.
 
@@ -420,41 +372,34 @@ R13. Total output must fit on a single A4 resume page. Target density: exactly 5
 
 Reminder: output the JSON object only. Your first character must be {{ and your last character must be }}."""
 
-    logger.info(f"Calling {model_name} for tailoring (Gemma tier): '{job.title}' @ {job.company}")
-
+    label = f"tailor:{job.company}"
     last_err: Exception | None = None
+    last_raw: str = ""
     for attempt in range(3):
         try:
-            _wait_for_gemma_rpm_slot()
-            response = model.generate_content(
+            last_raw = gemma_generate(
                 prompt,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.2,
-                    max_output_tokens=8192,
-                ),
+                max_output_tokens=8192,
+                temperature=0.2,
+                label=label,
             )
-            raw_json = _extract_json_object(response.text)
+            raw_json = _extract_json_object(last_raw)
             parsed = _GeminiTailoredAssets(**json.loads(raw_json))
             return _gemini_to_tailored(parsed)
-
-        except ResourceExhausted as e:
-            last_err = e
-            if attempt == 2:
-                raise
-            logger.warning(f"Gemma rate limit hit, retrying in 60s... (attempt {attempt + 1}/3)")
-            time.sleep(60)
 
         except (json.JSONDecodeError, ValidationError, ValueError) as e:
             last_err = e
             if attempt == 2:
-                preview = getattr(response, "text", "")[:500] if "response" in dir() else "<no response>"
                 raise ValueError(
                     f"Gemma output failed JSON/schema validation after 3 attempts for '{job.title}': {e}\n"
-                    f"Last raw output: {preview}"
+                    f"Last raw output: {last_raw[:500]}"
                 )
             logger.warning(
                 f"Gemma JSON/schema invalid, retrying... (attempt {attempt + 1}/3): {e}"
             )
 
-    # Unreachable — loop either returns or raises. Guard to satisfy type checkers.
     raise RuntimeError(f"Unexpected fallthrough in run_tailor_gemini: {last_err}")
+
+
+# Backwards-compatible alias — every tailor call now routes through Gemma.
+run_tailor = run_tailor_gemini

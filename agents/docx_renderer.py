@@ -39,9 +39,18 @@ _SKILL_LINE_INDICES = {
 }
 _INTERESTS_LINE = 36
 
+# Paragraphs whose `<w:spacing w:after=…>` we zero out at render time to keep
+# the tailored resume on a single page. The master DOCX has 12pt of trailing
+# space on the last intern bullet (pushes Projects + Education + Skills down)
+# and on the Interests line (wasted space on the last line of the doc). Both
+# combined push the Interests line onto page 2.
+_PARAGRAPHS_TO_TIGHTEN = (16, 36)
+
 # Body font used throughout — matches master's run-level formatting.
 _BODY_FONT_NAME = "Garamond"
 _BODY_FONT_SIZE_PT = 12
+
+_W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
 
 
 def _parse_bold_segments(text: str) -> list[tuple[str, bool]]:
@@ -68,6 +77,24 @@ def _parse_bold_segments(text: str) -> list[tuple[str, bool]]:
             continue
         segments.append((part, i % 2 == 1))
     return segments
+
+
+def _tighten_paragraph_spacing(paragraph: Paragraph) -> None:
+    """Drop the `w:after` attribute from <w:spacing> on a paragraph.
+
+    Leaves all other spacing attrs (line, lineRule, before) untouched so the
+    paragraph's vertical rhythm is preserved — we only remove the trailing
+    gap below it. Idempotent; safe if no spacing element exists.
+    """
+    ppr = paragraph._p.find(_W_NS + "pPr")
+    if ppr is None:
+        return
+    spacing = ppr.find(_W_NS + "spacing")
+    if spacing is None:
+        return
+    after_attr = _W_NS + "after"
+    if after_attr in spacing.attrib:
+        del spacing.attrib[after_attr]
 
 
 def _clear_paragraph_runs(paragraph: Paragraph) -> None:
@@ -216,6 +243,12 @@ def render_tailored_docx(assets: TailoredAssets, master_path: Path) -> bytes:
     # ── Interests line ────────────────────────────────────────────────────
     if assets.interests:
         _rewrite_interests_line(paragraphs[_INTERESTS_LINE], assets.interests)
+
+    # ── Spacing fix: remove trailing 12pt below the last intern bullet and
+    #     the Interests line so the tailored resume stays on a single page.
+    for idx in _PARAGRAPHS_TO_TIGHTEN:
+        if idx < len(paragraphs):
+            _tighten_paragraph_spacing(paragraphs[idx])
 
     buf = BytesIO()
     doc.save(buf)

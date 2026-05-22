@@ -2,20 +2,10 @@ import os
 import re
 import json
 import logging
-from pydantic import BaseModel
 from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
-import google.generativeai as genai
 from dotenv import load_dotenv
 
-
-class _JobScore(BaseModel):
-    """One scored job — used as the Gemini response schema.
-    Constraints (0-100 score, 80-char reason) live in the prompt;
-    Gemini's Schema proto rejects `minimum`/`maximum`/`maxLength`."""
-    job_id: str
-    score: int
-    reason: str
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -217,35 +207,43 @@ Jobs to score:
 """
 
 
+def _extract_json_array(text: str) -> str:
+    """Pull the first top-level JSON array out of a possibly fenced/prose response."""
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3]
+        text = text.strip()
+    start = text.find("[")
+    end = text.rfind("]")
+    if start == -1 or end <= start:
+        raise ValueError(f"No JSON array found in response: {text[:300]}")
+    return text[start:end + 1]
+
+
 def _gemini_batch_score(
     jobs: list[JobListing],
     profile: CandidateProfile
 ) -> dict[str, tuple[int, str]]:
-    """
-    Sends ALL jobs to Gemini Flash in a single API call.
-    Returns dict of job_id → (score, reason).
-    
-    Batching is the key cost optimization: 100 jobs in one call costs
-    the same input tokens as the prompt overhead, not 100× the overhead.
-    """
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise EnvironmentError("GEMINI_API_KEY not set")
+    """Batch-score every job in one Gemma call. Returns {job_id: (score, reason)}.
 
-    genai.configure(api_key=api_key)
-    model_name = os.getenv("MODEL_SCORER") or "gemini-2.5-flash-lite"
-    model = genai.GenerativeModel(model_name)
+    Batching is the key cost lever — 100 jobs in one call shares the prompt
+    overhead instead of paying it 100×. Gemma has no JSON mode, so we drive
+    structure through a strict prompt + array extractor + per-item validation.
+    """
+    # Local import avoids importing agent_1 at module-load time and keeps
+    # the Gemma client (primary + fallback + RPM throttle) in one place.
+    from agents.agent_1 import gemma_generate
 
-    # Build compact job representations — enough for scoring, not full JD
     jobs_for_scoring = [
         {
             "job_id": job.job_id,
             "title": job.title,
             "company": job.company,
             "location": job.location,
-            # Truncate description to 600 chars — needs to be long enough
-            # to capture YOE requirements which are often mid-description
-            "description_preview": job.description[:600]
+            # 600 chars is long enough to catch a mid-JD YOE requirement.
+            "description_preview": job.description[:600],
         }
         for job in jobs
     ]
@@ -256,27 +254,21 @@ def _gemini_batch_score(
         seniority=profile.seniority,
         domains=", ".join(profile.domains),
         max_yoe=profile.max_yoe_applying_for,
-        jobs_json=json.dumps(jobs_for_scoring, indent=2)
+        jobs_json=json.dumps(jobs_for_scoring, indent=2),
     )
 
-    logger.info(f"Sending {len(jobs)} jobs to {model_name} for batch scoring (structured output)...")
-
-    # response_schema=list[_JobScore] forces Gemini to return a valid JSON array
-    # matching the schema — no markdown, no thinking preamble, no parsing hacks.
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.GenerationConfig(
-            temperature=0.0,
-            max_output_tokens=6144,
-            response_mime_type="application/json",
-            response_schema=list[_JobScore],
-        )
-    )
+    logger.info(f"Sending {len(jobs)} jobs to Gemma for batch scoring (prompt-driven JSON)...")
 
     try:
-        scored_list = json.loads(response.text)
-    except json.JSONDecodeError as e:
-        logger.error(f"Gemini batch scoring parse failed: {e}\nRaw: {response.text[:500]}")
+        raw = gemma_generate(
+            prompt,
+            max_output_tokens=6144,
+            temperature=0.0,
+            label="ranker",
+        )
+        scored_list = json.loads(_extract_json_array(raw))
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.error(f"Gemma batch scoring parse failed: {e}")
         return {job.job_id: (50, "parse failed — default score") for job in jobs}
 
     scores: dict[str, tuple[int, str]] = {}
@@ -286,7 +278,7 @@ def _gemini_batch_score(
         except (KeyError, ValueError, TypeError):
             continue
 
-    logger.info(f"Gemini scored {len(scores)}/{len(jobs)} jobs successfully")
+    logger.info(f"Gemma scored {len(scores)}/{len(jobs)} jobs successfully")
     return scores
 
 

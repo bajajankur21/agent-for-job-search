@@ -44,6 +44,54 @@ def _wait_for_gemma_rpm_slot() -> None:
     _GEMMA_CALL_TIMES.append(time.monotonic())
 
 
+def _call_model_with_retries(
+    model_name: str,
+    prompt: str,
+    gen_config,
+    label: str,
+    max_attempts: int = 3,
+) -> str:
+    """One model + bounded retries on transient server-side failures.
+
+    Transient = ResourceExhausted (429), InternalServerError (500),
+    ServiceUnavailable (503), DeadlineExceeded (504). All other exceptions
+    propagate immediately so the caller can decide whether to fall back.
+    Backoff: 30s, 60s, 120s.
+    """
+    import google.generativeai as genai
+    from google.api_core.exceptions import (
+        ResourceExhausted,
+        InternalServerError,
+        ServiceUnavailable,
+        DeadlineExceeded,
+    )
+
+    transient = (ResourceExhausted, InternalServerError, ServiceUnavailable, DeadlineExceeded)
+    backoffs = [30, 60, 120]
+
+    model = genai.GenerativeModel(model_name)
+    last_err: Exception | None = None
+    for attempt in range(max_attempts):
+        try:
+            _wait_for_gemma_rpm_slot()
+            logger.info(f"[{label}] calling {model_name} (attempt {attempt + 1}/{max_attempts})")
+            response = model.generate_content(prompt, generation_config=gen_config)
+            return response.text
+        except transient as e:
+            last_err = e
+            if attempt == max_attempts - 1:
+                logger.warning(
+                    f"[{label}] {model_name} transient {type(e).__name__} exhausted after {max_attempts} attempts: {e}"
+                )
+                raise
+            wait = backoffs[min(attempt, len(backoffs) - 1)]
+            logger.warning(
+                f"[{label}] {model_name} transient {type(e).__name__}, sleeping {wait}s: {e}"
+            )
+            time.sleep(wait)
+    raise RuntimeError(f"Unreachable retry loop fall-through: {last_err}")
+
+
 def gemma_generate(
     prompt: str,
     max_output_tokens: int = 4096,
@@ -52,17 +100,17 @@ def gemma_generate(
 ) -> str:
     """Call Gemma with primary model, fall back to secondary on failure.
 
-    Tries MODEL_TAILORING_GEMINI (default gemma-4-31b-it) first; on
-    ResourceExhausted (after a single 60s retry) or any other exception,
-    falls back to MODEL_FALLBACK_GEMINI (default gemma-3-27b-it). RPM
-    throttle is applied on every attempt.
+    Tries MODEL_TAILORING_GEMINI (default gemma-4-31b-it) with bounded
+    retries on transient server errors; on persistent failure or any
+    non-transient exception, falls back to MODEL_FALLBACK_GEMINI (default
+    gemma-4-26b-a4b-it) with its own retry budget. RPM throttle is
+    applied on every attempt.
 
     Gemma on AI Studio does NOT support JSON mode (response_schema /
     response_mime_type are rejected), so callers must enforce JSON shape
     via prompt + a robust extractor on the returned string.
     """
     import google.generativeai as genai
-    from google.api_core.exceptions import ResourceExhausted
 
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -77,30 +125,15 @@ def gemma_generate(
         max_output_tokens=max_output_tokens,
     )
 
-    # Primary: gemma-4-31b-it, up to 2 attempts (one retry on rate limit).
-    for attempt in range(2):
-        try:
-            _wait_for_gemma_rpm_slot()
-            logger.info(f"[{label}] calling {primary} (attempt {attempt + 1}/2)")
-            model = genai.GenerativeModel(primary)
-            response = model.generate_content(prompt, generation_config=gen_config)
-            return response.text
-        except ResourceExhausted as e:
-            if attempt == 0:
-                logger.warning(f"[{label}] {primary} rate-limited, retrying in 60s: {e}")
-                time.sleep(60)
-                continue
-            logger.warning(f"[{label}] {primary} rate-limited twice, falling back to {fallback}")
-        except Exception as e:
-            logger.warning(f"[{label}] {primary} failed ({type(e).__name__}: {e}); falling back to {fallback}")
-            break
+    try:
+        return _call_model_with_retries(primary, prompt, gen_config, label, max_attempts=3)
+    except Exception as e:
+        logger.warning(
+            f"[{label}] primary {primary} exhausted ({type(e).__name__}: {e}); "
+            f"falling back to {fallback}"
+        )
 
-    # Fallback: gemma-3-27b-it.
-    _wait_for_gemma_rpm_slot()
-    logger.info(f"[{label}] calling fallback {fallback}")
-    model = genai.GenerativeModel(fallback)
-    response = model.generate_content(prompt, generation_config=gen_config)
-    return response.text
+    return _call_model_with_retries(fallback, prompt, gen_config, label, max_attempts=3)
 
 
 class ExperienceEntry(BaseModel):

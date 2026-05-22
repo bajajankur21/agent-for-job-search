@@ -222,18 +222,17 @@ def _extract_json_array(text: str) -> str:
     return text[start:end + 1]
 
 
-def _gemini_batch_score(
-    jobs: list[JobListing],
-    profile: CandidateProfile
+def _score_one_chunk(
+    jobs_chunk: list[JobListing],
+    profile: CandidateProfile,
+    chunk_idx: int,
+    chunk_count: int,
 ) -> dict[str, tuple[int, str]]:
-    """Batch-score every job in one Gemma call. Returns {job_id: (score, reason)}.
+    """Score a single chunk of jobs via Gemma. Returns {job_id: (score, reason)}.
 
-    Batching is the key cost lever — 100 jobs in one call shares the prompt
-    overhead instead of paying it 100×. Gemma has no JSON mode, so we drive
-    structure through a strict prompt + array extractor + per-item validation.
+    Failures here degrade gracefully — a parse error returns a default score=50
+    for that chunk so we don't lose the whole run to one bad response.
     """
-    # Local import avoids importing agent_1 at module-load time and keeps
-    # the Gemma client (primary + fallback + RPM throttle) in one place.
     from agents.agent_1 import gemma_generate
 
     jobs_for_scoring = [
@@ -242,10 +241,9 @@ def _gemini_batch_score(
             "title": job.title,
             "company": job.company,
             "location": job.location,
-            # 600 chars is long enough to catch a mid-JD YOE requirement.
             "description_preview": job.description[:600],
         }
-        for job in jobs
+        for job in jobs_chunk
     ]
 
     prompt = GEMINI_BATCH_SCORING_PROMPT.format(
@@ -257,19 +255,23 @@ def _gemini_batch_score(
         jobs_json=json.dumps(jobs_for_scoring, indent=2),
     )
 
-    logger.info(f"Sending {len(jobs)} jobs to Gemma for batch scoring (prompt-driven JSON)...")
+    logger.info(
+        f"Ranker chunk {chunk_idx}/{chunk_count}: scoring {len(jobs_chunk)} jobs"
+    )
 
     try:
         raw = gemma_generate(
             prompt,
-            max_output_tokens=6144,
+            max_output_tokens=4096,
             temperature=0.0,
-            label="ranker",
+            label=f"ranker:{chunk_idx}/{chunk_count}",
         )
         scored_list = json.loads(_extract_json_array(raw))
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.error(f"Gemma batch scoring parse failed: {e}")
-        return {job.job_id: (50, "parse failed — default score") for job in jobs}
+    except Exception as e:
+        # Includes JSONDecodeError, ValueError, DeadlineExceeded, NotFound, etc.
+        # Default-score the chunk so the run survives a single bad response.
+        logger.error(f"Ranker chunk {chunk_idx} failed ({type(e).__name__}): {e}")
+        return {job.job_id: (50, "chunk failed — default score") for job in jobs_chunk}
 
     scores: dict[str, tuple[int, str]] = {}
     for item in scored_list:
@@ -277,8 +279,38 @@ def _gemini_batch_score(
             scores[item["job_id"]] = (int(item["score"]), item.get("reason", ""))
         except (KeyError, ValueError, TypeError):
             continue
+    return scores
 
-    logger.info(f"Gemma scored {len(scores)}/{len(jobs)} jobs successfully")
+
+# How many jobs per Gemma scoring call. Empirically: 84-job batches blow past
+# the server-side deadline on gemma-4-31b-it (>10 min). 20 keeps each request
+# well under a minute and lets a single bad chunk be retried/defaulted in
+# isolation. Tune via env without touching code.
+_RANKER_CHUNK_SIZE_DEFAULT = 20
+
+
+def _gemini_batch_score(
+    jobs: list[JobListing],
+    profile: CandidateProfile
+) -> dict[str, tuple[int, str]]:
+    """Chunked batch-score across all jobs. Returns {job_id: (score, reason)}.
+
+    Chunks are sized to keep each Gemma call short enough to avoid the
+    server-side 504 deadline. The shared gemma_generate helper handles
+    primary→fallback model selection and RPM throttling per call.
+    """
+    chunk_size = int(os.getenv("RANKER_CHUNK_SIZE", _RANKER_CHUNK_SIZE_DEFAULT))
+    chunks = [jobs[i:i + chunk_size] for i in range(0, len(jobs), chunk_size)]
+    logger.info(
+        f"Sending {len(jobs)} jobs to Gemma in {len(chunks)} chunk(s) "
+        f"of up to {chunk_size} (prompt-driven JSON)..."
+    )
+
+    scores: dict[str, tuple[int, str]] = {}
+    for i, chunk in enumerate(chunks, start=1):
+        scores.update(_score_one_chunk(chunk, profile, i, len(chunks)))
+
+    logger.info(f"Gemma scored {len(scores)}/{len(jobs)} jobs across {len(chunks)} chunk(s)")
     return scores
 
 

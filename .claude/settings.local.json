@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python scripts/inspect_master_docx.py)",
       "Bash(python scripts/smoke_render.py)",
-      "Bash(.venv/Scripts/python.exe -c ' *)"
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe list_models.py)"
     ]
   }
 }

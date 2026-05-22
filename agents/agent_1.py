@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 _PRIMARY_MODEL_ENV = "MODEL_TAILORING_GEMINI"
 _PRIMARY_MODEL_DEFAULT = "gemma-4-31b-it"
 _FALLBACK_MODEL_ENV = "MODEL_FALLBACK_GEMINI"
-_FALLBACK_MODEL_DEFAULT = "gemma-3-27b-it"
+# Default fallback is the only other Gemma exposed on AI Studio v1beta for this
+# key (verified via `python list_models.py`). Gemma 3 IDs are not reachable on
+# this account — do not put a Gemma 3 ID here without confirming list_models.
+_FALLBACK_MODEL_DEFAULT = "gemma-4-26b-a4b-it"
 
 _GEMMA_CALL_TIMES: deque = deque()
 

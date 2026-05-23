@@ -46,11 +46,27 @@ _INTERESTS_LINE = 36
 # combined push the Interests line onto page 2.
 _PARAGRAPHS_TO_TIGHTEN = (16, 36)
 
+# Paragraphs whose paragraph-mark rPr uses Noto Sans Symbols without an
+# explicit <w:sz>, which makes Word render the bullet glyph at the default
+# (larger) size and inflates the line height — visible as an extra gap above
+# those bullets. Normalize them to Garamond 12pt to match every other bullet.
+_PARAGRAPHS_TO_NORMALIZE_MARK = (16, 36)
+
+# Index of the trailing empty paragraph Word forces into the document. With
+# default line height it can overflow onto a phantom page 2 when the layout
+# is tight. Render it with a 1pt font + no line spacing to collapse it.
+_TRAILING_EMPTY_PARAGRAPH = 37
+
 # Body font used throughout — matches master's run-level formatting.
 _BODY_FONT_NAME = "Garamond"
 _BODY_FONT_SIZE_PT = 12
 
 _W_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+
+
+def _qn(tag: str) -> str:
+    """Qualify a w:-prefixed tag name with the wordprocessingml namespace."""
+    return _W_NS + tag
 
 
 def _parse_bold_segments(text: str) -> list[tuple[str, bool]]:
@@ -77,6 +93,80 @@ def _parse_bold_segments(text: str) -> list[tuple[str, bool]]:
             continue
         segments.append((part, i % 2 == 1))
     return segments
+
+
+def _normalize_paragraph_mark_size(paragraph: Paragraph) -> None:
+    """Set the paragraph-mark size to 12pt without touching its font.
+
+    Word renders the list bullet glyph using the paragraph mark's font + size
+    (the rPr inside pPr). Two bullets in the master (P016 last intern bullet
+    and P036 Interests line) declare a font (Noto Sans Symbols) but NO size,
+    so the glyph inherits a larger size from style defaults — which inflates
+    line height and shows up as a gap above those rows. Pinning only the size
+    to 12pt (matches every other body bullet) removes the gap. We deliberately
+    leave rFonts alone — the master's bullet character renders correctly in
+    Noto Sans Symbols and falls back to a smaller glyph in Garamond.
+    """
+    ppr = paragraph._p.find(_qn("pPr"))
+    if ppr is None:
+        return
+    rpr = ppr.find(_qn("rPr"))
+    if rpr is None:
+        from lxml import etree as _et
+        rpr = _et.SubElement(ppr, _qn("rPr"))
+
+    half_pt = str(_BODY_FONT_SIZE_PT * 2)
+    sz = rpr.find(_qn("sz"))
+    if sz is None:
+        from lxml import etree as _et
+        sz = _et.SubElement(rpr, _qn("sz"))
+    sz.set(_qn("val"), half_pt)
+
+    sz_cs = rpr.find(_qn("szCs"))
+    if sz_cs is None:
+        from lxml import etree as _et
+        sz_cs = _et.SubElement(rpr, _qn("szCs"))
+    sz_cs.set(_qn("val"), half_pt)
+
+
+def _collapse_trailing_paragraph(paragraph: Paragraph) -> None:
+    """Shrink the bare trailing paragraph to ~zero height.
+
+    Word refuses to remove the final paragraph in a section, but if the
+    body just barely overflows the page that paragraph alone is enough
+    to spawn a blank page 2. Setting its line spacing to an exact tiny
+    value + its paragraph-mark font to 1pt collapses it visually without
+    deleting it.
+    """
+    from lxml import etree as _et
+    p = paragraph._p
+    ppr = p.find(_qn("pPr"))
+    if ppr is None:
+        ppr = _et.SubElement(p, _qn("pPr"))
+        p.insert(0, ppr)
+
+    # spacing: exact 20 twips (≈1pt) line, no before/after
+    spacing = ppr.find(_qn("spacing"))
+    if spacing is None:
+        spacing = _et.SubElement(ppr, _qn("spacing"))
+    for attr in ("before", "after"):
+        if _qn(attr) in spacing.attrib:
+            del spacing.attrib[_qn(attr)]
+    spacing.set(_qn("line"), "20")
+    spacing.set(_qn("lineRule"), "exact")
+
+    # paragraph-mark rPr → 1pt
+    rpr = ppr.find(_qn("rPr"))
+    if rpr is None:
+        rpr = _et.SubElement(ppr, _qn("rPr"))
+    sz = rpr.find(_qn("sz"))
+    if sz is None:
+        sz = _et.SubElement(rpr, _qn("sz"))
+    sz.set(_qn("val"), "2")  # 1pt = 2 half-points
+    sz_cs = rpr.find(_qn("szCs"))
+    if sz_cs is None:
+        sz_cs = _et.SubElement(rpr, _qn("szCs"))
+    sz_cs.set(_qn("val"), "2")
 
 
 def _tighten_paragraph_spacing(paragraph: Paragraph) -> None:
@@ -249,6 +339,18 @@ def render_tailored_docx(assets: TailoredAssets, master_path: Path) -> bytes:
     for idx in _PARAGRAPHS_TO_TIGHTEN:
         if idx < len(paragraphs):
             _tighten_paragraph_spacing(paragraphs[idx])
+
+    # ── Bullet-glyph fix: normalize paragraph-mark font on the two bullets
+    #     whose master rPr uses Noto Sans Symbols without an explicit size,
+    #     which renders their bullet glyph oversize and inflates line height.
+    for idx in _PARAGRAPHS_TO_NORMALIZE_MARK:
+        if idx < len(paragraphs):
+            _normalize_paragraph_mark_size(paragraphs[idx])
+
+    # ── Page-2 fix: collapse the bare trailing paragraph to ~1pt so it
+    #     never overflows onto a phantom second page.
+    if _TRAILING_EMPTY_PARAGRAPH < len(paragraphs):
+        _collapse_trailing_paragraph(paragraphs[_TRAILING_EMPTY_PARAGRAPH])
 
     buf = BytesIO()
     doc.save(buf)

@@ -341,10 +341,10 @@ _GEMMA_JSON_TEMPLATE = """{
     "bullets": ["**Leadership:** ...", "**Management:** ..."]
   },
   "form_answers": {
-    "describe_last_role": "<string>",
-    "describe_second_last_role": "<string>",
-    "why_this_company": "<string>",
-    "biggest_achievement": "<STAR format>",
+    "describe_last_role": "<80-120 words, first person, 4+ accomplishments with tech AND metrics from master resume's most recent role, mapped to JD>",
+    "describe_second_last_role": "<60-90 words, first person, 3+ accomplishments with tech AND metrics from master resume's older role>",
+    "why_this_company": "<60-100 words, 3-4 sentences: specific company hook, 2+ matching candidate strengths, forward-looking close. No generic clichés.>",
+    "biggest_achievement": "<80-120 words, explicit 'Situation: ... Task: ... Action: ... Result: ...' labeled STAR format>",
     "notice_period": "<string>",
     "expected_ctc": "<string>"
   },
@@ -399,7 +399,12 @@ R7. Do NOT include a "summary" field or a "projects" field. The master resume ha
 R8. `skills` has EXACTLY these 4 keys: "Languages & Backend", "Frontend & Architecture", "Cloud & DevOps", "Testing & Design". Each value is a non-empty array. JD-relevant items first.
 R9. `interests` is a single comma-separated string copied from the master's Interests line (may be trimmed, but do not invent).
 R10. `education` is an object: {{ "institution": "...", "degree": "...", "date": "...", "bullets": ["**Leadership:** ...", "**Management:** ..."] }}. Bullets use the same bold-lead-in shape as R4.
-R11. `form_answers` has all 6 keys populated with non-empty strings: describe_last_role, describe_second_last_role, why_this_company, biggest_achievement (STAR format), notice_period, expected_ctc. Reference exact titles from the master resume — do NOT promote, rename, or embellish titles.
+R11. `form_answers` has all 6 keys populated with non-empty strings. Reference exact titles from the master resume — do NOT promote, rename, or embellish titles. Detailed requirements per field:
+   - `describe_last_role`: 80-120 words, first person ("As a <exact title> at <company>, I ..."). MUST include at least 4 distinct accomplishments pulled from the master resume's most-recent role, each with concrete tech names AND metrics (team size, user counts, latency, uptime, % improvements, hours saved, etc.). Cover breadth: leadership/scope + frontend work + backend/infra work + measurable business impact. Reframe to highlight overlap with the target JD's tech stack and responsibilities. Do NOT collapse into one or two sentences.
+   - `describe_second_last_role`: 60-90 words, same first-person opener using the EXACT older title. Include at least 3 accomplishments from the master's older role with tech + metrics. Reframe toward the JD where honest.
+   - `why_this_company`: 60-100 words, 3-4 sentences. Sentence 1: name something specific about THIS company's product, mission, or domain (inferred from the JD/company name) — not a generic platitude. Sentence 2-3: connect that to 2+ specific things the candidate has done (tech, scale, domain) that map to the role. Sentence 4: forward-looking — what the candidate wants to build/learn there. Avoid clichés like "innovative culture", "cutting-edge technology", "passionate team".
+   - `biggest_achievement`: 80-120 words in explicit STAR format with labeled sections — "Situation: ... Task: ... Action: ... Result: ...". Pick the master-resume achievement with the strongest tech/metric overlap with the JD.
+   - `notice_period`, `expected_ctc`: copy verbatim from the candidate profile if present, else use sensible defaults ("Immediate / 30 days", "As per company standards and role").
 R12. `job_title_used` = "{job.title}" and `company_name_used` = "{job.company}" — copy these exact strings.
 R13. Total output must fit on a single A4 resume page. Target density: exactly 5 bullets on primary role, 3 on older roles, 4 skill categories fully populated.
 

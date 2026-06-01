@@ -67,6 +67,9 @@ NON_SDE_TITLE_KEYWORDS = {
     "scrum master", "agile coach", "customer success", "support engineer",
     "technical support", "it support", "helpdesk", "network engineer",
     "system administrator", "sysadmin", "database administrator", "dba",
+    # QA / Testing roles
+    "qa ", "quality assurance", "automation engineer", "test engineer",
+    "sdet", "testing engineer", "manual tester", "qa analyst",
     # Senior / non-IC roles a junior candidate should never match
     "vice president", "vp ", "vp,", " vp", "director", "head of",
     "engineering manager", "em ", "chief", "cto", "cio", "cfo",
@@ -79,16 +82,16 @@ NON_SDE_TITLE_KEYWORDS = {
 
 _YOE_PATTERNS = [
     # Explicit requirement phrases — high confidence
-    (r'\b(?:minimum|min\.?|at\s+least)\s+(?:of\s+)?(\d+)\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)', 1),
-    (r'\b(?:require[sd]?|expecting|need[sd]?)\s+(\d+)\+?\s*(?:years?|yrs?)', 1),
-    # "N+ years of experience" — must have experience/exp anchor to avoid matching company descriptions
+    (r'\b(?:minimum|min\.?|at\s+least|around|approx\.?)\s+(?:of\s+)?(\d+)\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp|professional|relevant|hands[\s-]?on|working)', 1),
+    (r'\b(?:require[sd]?|expecting|need[sd]?|looking\s+for)\s+(?:of\s+)?(\d+)\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp|professional|relevant|hands[\s-]?on|working)', 1),
+    # "N+ years of experience"
     (r'\b(\d+)\+\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp|relevant|professional|hands[\s-]?on|working)', 1),
+    # "N years of experience" (no plus, but clearly a requirement)
+    (r'\b(\d+)\s+(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp|relevant|professional|hands[\s-]?on|working)\b', 1),
     # Range: "2-5 years experience"
-    (r'\b(\d+)\s*(?:to|-|–)\s*\d+\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)', 1),
-    # "N years of experience"
-    (r'\b(\d+)\s+(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp)\b', 1),
+    (r'\b(\d+)\s*(?:to|-|–)\s*\d+\s*(?:years?|yrs?)\s+(?:of\s+)?(?:experience|exp|relevant|professional|hands[\s-]?on|working)', 1),
     # "experience of N years"
-    (r'\bexperience\s+of\s+(\d+)\s+(?:years?|yrs?)\b', 1),
+    (r'\bexperience\s+(?:of\s+)?(\d+)\s+(?:years?|yrs?)\b', 1),
     # "exp: 5" or "experience: 5"
     (r'\bexp(?:erience)?\s*[:\-]\s*(\d+)', 1),
 ]

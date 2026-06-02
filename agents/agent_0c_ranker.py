@@ -180,7 +180,7 @@ def _passes_hard_filter(job: JobListing, profile: CandidateProfile) -> tuple[boo
 
 
 GEMINI_BATCH_SCORING_PROMPT = """
-You are a technical recruiter scoring job listings for a specific candidate.
+You are an expert recruiter scoring job listings for a specific candidate.
 
 Candidate profile:
 {profile_summary}
@@ -195,10 +195,10 @@ If a job explicitly requires more than {max_yoe} years of experience, assign sco
 This overrides all other factors. Do not reward skill match or company quality for over-levelled roles.
 
 Score each remaining job on a scale of 0-100 based on:
-- Skill match (40 points): How many of the candidate's core skills does this job require?
-- Seniority fit (25 points): Is the role level appropriate for the candidate?
+- Skill match (40 points): How many of the candidate's core skills and expertise does this job require?
+- Seniority fit (25 points): Is the role level appropriate for the candidate's experience?
 - Domain relevance (20 points): Does the domain match the candidate's background?
-- Company quality (15 points): Product company, funded startup, or known tech brand scores higher than unknown.
+- Company quality (15 points): Product companies, funded startups, or known brands score higher than unknown ones.
 
 Return ONLY a raw JSON array — no markdown, no explanation, no code fences.
 One object per job, in the same order as input.
@@ -380,4 +380,4 @@ def rank_and_filter_jobs(
         f"min score {min_score}/100, "
         f"capped at {target_output})"
     )
-    return final
+    return finaln final

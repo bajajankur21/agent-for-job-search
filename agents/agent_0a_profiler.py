@@ -105,7 +105,7 @@ _PROFILE_JSON_TEMPLATE = """{
 
 
 PROFILE_EXTRACTION_PROMPT = """
-You are an expert technical recruiter. Extract a structured candidate profile from the resume text below.
+You are an expert recruiter across multiple industries. Extract a structured candidate profile from the resume text below.
 
 Today's date is: {today_date}
 
@@ -114,10 +114,10 @@ Rules:
 - If a field cannot be determined, use a sensible default — never omit a field.
 - For total_yoe: calculate from work history dates. "Present" means today ({today_date}). Include ALL roles — full-time AND internships — in the total. Round to nearest 0.5.
 - For seniority: infer from titles, YOE, and scope of responsibilities.
-- For search_keywords: generate 8-12 SHORT job title keywords (1-3 words each) for Google Jobs search. These will be used directly as search queries, so make them seniority-appropriate. For junior/entry-level candidates, include role variants like "Junior Developer", "SDE 1", "Associate Engineer", "Graduate Engineer". For mid-level, include both plain and "SDE II" style. For senior, include "Senior", "Lead". Always include plain role titles (e.g. "Backend Engineer") alongside seniority-qualified ones. Each keyword must work as a standalone search term.
-- For company_type_preference: always set to "product" unless the resume strongly signals service/consulting background.
-- For preferred_locations: default to ["Bengaluru", "Remote"] unless other locations are stated.
-- For max_yoe_applying_for: always set to 4. This is a strict ceiling to filter out all Senior, Lead, and 5+ YOE roles, ensuring the candidate only sees mid-level and junior opportunities.
+- For search_keywords: generate 8-12 SHORT job title keywords (1-3 words each) that accurately reflect the candidate's expertise and target roles. These will be used directly as search queries, so make them appropriate for the candidate's seniority. Include both plain role titles (e.g. "Product Manager") and seniority-qualified ones (e.g. "Senior Product Manager"). Each keyword must work as a standalone search term.
+- For company_type_preference: set to "product" unless the resume strongly signals service/consulting background.
+- For preferred_locations: identify the candidate's current city from the resume and include it, always include "Remote", and any other locations explicitly mentioned as preferred.
+- For max_yoe_applying_for: determine a reasonable upper limit for roles the candidate is qualified for. Typically, this is 2-3 years above their total_yoe. This is a strict ceiling to filter out roles that are too senior.
 
 Output rules:
 - Output ONE JSON object only. No prose, no markdown fences. Start with {{ and end with }}.

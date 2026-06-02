@@ -1,17 +1,17 @@
 name: Test Pipeline
 
-on:
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: 'Test mode'
-        required: true
-        default: 'default'
-        type: choice
-        options:
-          - default
-          - gemini-only
-          - mock-all
+# on:
+#   workflow_dispatch:
+#     inputs:
+#       mode:
+#         description: 'Test mode'
+#         required: true
+#         default: 'default'
+#         type: choice
+#         options:
+#           - default
+#           - gemini-only
+#           - mock-all
 
 jobs:
   test-pipeline:

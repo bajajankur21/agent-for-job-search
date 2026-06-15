@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        :root {
+            --primary-color: #333;
+            --secondary-color: #666;
+            --accent-color: #000;
+            --font-main: 'Helvetica', 'Arial', sans-serif;
+            --line-height: 1.4;
+            --margin-top: 40px;
+            --margin-bottom: 40px;
+            --margin-side: 50px;
+        }
+
+        body {
+            font-family: var(--font-main);
+            color: var(--primary-color);
+            line-height: var(--line-height);
+            margin: 0;
+            padding: 0;
+            background-color: white;
+        }
+
+        .page {
+            padding: var(--margin-top) var(--margin-side) var(--margin-bottom) var(--margin-side);
+            position: relative;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--accent-color);
+            padding-bottom: 10px;
+        }
+
+        .header h1 {
+            font-size: 24pt;
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .contact-info {
+            font-size: 10pt;
+            color: var(--secondary-color);
+            margin-top: 5px;
+        }
+
+        .section {
+            margin-bottom: 15px;
+        }
+
+        .section-title {
+            font-size: 12pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 8px;
+            color: var(--accent-color);
+        }
+
+        .role-block {
+            margin-bottom: 12px;
+            page-break-inside: avoid;
+        }
+
+        .role-header {
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            font-size: 11pt;
+            margin-bottom: 4px;
+        }
+
+        .role-title {
+            font-style: italic;
+            color: var(--secondary-color);
+            font-weight: normal;
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        .bullet-list {
+            margin: 0;
+            padding-left: 18px;
+        }
+
+        .bullet-item {
+            font-size: 10pt;
+            margin-bottom: 3px;
+            text-align: justify;
+        }
+
+        .skills-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 5px;
+        }
+
+        .skill-category {
+            font-size: 10pt;
+        }
+
+        .skill-label {
+            font-weight: bold;
+        }
+
+        .interests-text {
+            font-size: 10pt;
+            text-align: justify;
+        }
+
+        @media print {
+            body { margin: 0; }
+            .page { padding: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="header">
+            <h1>{{ profile.full_name }}</h1>
+            <div class="contact-info">
+                {{ profile.email }} | {{ profile.phone }} | {{ profile.location_city }} <br>
+                LinkedIn: {{ profile.linkedin }} | GitHub: {{ profile.github }}
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Professional Experience</div>
+            {% for role in assets.experience %}
+            <div class="role-block">
+                <div class="role-header">
+                    <span>{{ role.company }}</span>
+                    <span>{{ role.dates }}</span>
+                </div>
+                <span class="role-title">{{ role.title }} | {{ role.location }}</span>
+                <ul class="bullet-list">
+                    {% for bullet in role.bullets %}
+                    <li class="bullet-item">{{ bullet }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="section">
+            <div class="section-title">Education</div>
+            <div class="role-block">
+                <div class="role-header">
+                    <span>{{ assets.education.institution }}</span>
+                    <span>{{ assets.education.date }}</span>
+                </div>
+                <span class="role-title">{{ assets.education.degree }}</span>
+                <ul class="bullet-list">
+                    {% for bullet in assets.education.bullets %}
+                    <li class="bullet-item">{{ bullet }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Skills & Expertise</div>
+            <div class="skills-grid">
+                {% for category, skills in assets.skills.items() %}
+                <div class="skill-category">
+                    <span class="skill-label">{{ category }}:</span> {{ skills | join(', ') }}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Interests</div>
+            <div class="interests-text">{{ assets.interests }}</div>
+        </div>
+    </div>
+</body>
+</html>

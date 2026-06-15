@@ -9,10 +9,10 @@ This document outlines the strict priority sequence for the commercialization of
 - **Requirement:** The pipeline must produce high-quality results for a non-SDE role (e.g., Product Manager) using only a resume and minimal preferences.
 
 ## Priority 2: Resume Tailoring Agnosticism (The Fidelity)
-**Goal:** Professional PDF output for any user-provided template.
-- **Tagged Templating:** Implement the `[[TAG]]` system in `docx_renderer.py`.
-- **Dynamic Mapping:** The system must find tags at runtime and inject tailored content without breaking the template layout.
-- **Requirement:** Successful render of a tailored resume using a template the system has never seen before.
+**Goal:** Professional PDF output via a Dynamic HTML-to-PDF Engine.
+- **HTML/CSS Template System:** Implement a high-fidelity rendering pipeline using Jinja2 and Playwright (Headless Chromium) to generate pixel-perfect PDFs from designer-approved templates.
+- **Dynamic Density Logic:** Implement a "Density Profile" system that adjusts line-heights, margins, and pagination rules based on the candidate's YOE (e.g., Compact for < 5yrs, Expansive for 10+ yrs) to optimize page count.
+- **Requirement:** Successful render of a tailored resume using a dynamic HTML template that automatically scales layout and pagination based on candidate experience without manual tagging.
 
 ## Priority 3: Orchestration Layer (The API & Queue)
 **Goal:** Transition from a linear script to a scalable service.

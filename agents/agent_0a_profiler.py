@@ -32,13 +32,15 @@ class CandidateProfile(BaseModel):
     github: Optional[str] = Field(default=None)
     location_city: Optional[str] = Field(default=None, description="City shown in resume header")
     # Hard constraints for job matching — these are filters, not preferences
-    preferred_locations: list[str] = Field(default=["Bengaluru", "Remote"])
+    preferred_locations: list[str] = Field(default_factory=list)
     company_type_preference: str = Field(
         default="product",
         description="product / service / both"
     )
     max_yoe_applying_for: int = Field(
-        default=4,
+        default=10,
+        ge=1,
+        le=20,
         description="Kill switch threshold. Don't apply to jobs requiring more than this."
     )
     search_keywords: list[str] = Field(
@@ -117,7 +119,7 @@ Rules:
 - For search_keywords: generate 8-12 SHORT job title keywords (1-3 words each) that accurately reflect the candidate's expertise and target roles. These will be used directly as search queries, so make them appropriate for the candidate's seniority. Include both plain role titles (e.g. "Product Manager") and seniority-qualified ones (e.g. "Senior Product Manager"). Each keyword must work as a standalone search term.
 - For company_type_preference: set to "product" unless the resume strongly signals service/consulting background.
 - For preferred_locations: identify the candidate's current city from the resume and include it, always include "Remote", and any other locations explicitly mentioned as preferred.
-- For max_yoe_applying_for: determine a reasonable upper limit for roles the candidate is qualified for. Typically, this is 2-3 years above their total_yoe. This is a strict ceiling to filter out roles that are too senior.
+- For max_yoe_applying_for: determine a reasonable upper limit for roles the candidate is qualified for (must be between 1 and 20). Typically, this is 2-3 years above their total_yoe. This is a strict ceiling to filter out roles that are too senior.
 
 Output rules:
 - Output ONE JSON object only. No prose, no markdown fences. Start with {{ and end with }}.

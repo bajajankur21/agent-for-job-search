@@ -2,9 +2,16 @@ import os
 import re
 import json
 import logging
+from typing import Optional
+import hashlib
+import pandas as pd
+from pydantic import BaseModel
+from dotenv import load_dotenv
 from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
-from dotenv import load_dotenv
+
+load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 load_dotenv()
@@ -105,7 +112,7 @@ _TITLE_SENIORITY_MAP = [
 ]
 
 
-def _regex_min_yoe(job: JobListing) -> int | None:
+def _regex_min_yoe(job: JobListing) -> Optional[int]:
     """
     Extracts minimum YOE from title + description using regex.
     Returns an int if found confidently, None if ambiguous.
@@ -130,48 +137,42 @@ def _regex_min_yoe(job: JobListing) -> int | None:
 def _passes_hard_filter(job: JobListing, profile: CandidateProfile) -> tuple[bool, str]:
     """
     Zero-cost Python pre-filter. Returns (passes, reason_if_rejected).
-    Eliminates non-SDE roles, service companies, wrong locations,
-    jobs with no technical keywords, and — critically — over-levelled
-    jobs where regex can confidently determine YOE > threshold.
+    Eliminates companies, wrong locations, jobs with no relevant keywords,
+    and — critically — over-levelled jobs where regex can confidently determine YOE > threshold.
     This keeps the Gemini batch small, cheap, and focused.
     """
     title_lower = job.title.lower()
     company_lower = job.company.lower().strip()
 
-    # 1. Title must look like an SDE role
-    for kw in NON_SDE_TITLE_KEYWORDS:
-        if kw in title_lower:
-            return False, f"Non-SDE title keyword: '{kw}'"
+    # 1. Service company blacklist (only apply if user specifically wants product companies)
+    if profile.company_type_preference == "product":
+        if company_lower in SERVICE_COMPANY_BLACKLIST:
+            return False, f"Service company: {job.company}"
 
-    # 2. Service company blacklist
-    if company_lower in SERVICE_COMPANY_BLACKLIST:
-        return False, f"Service company: {job.company}"
-
-    # 3. Personal exclusion list (current employer + companies with existing offers)
+    # 2. Personal exclusion list (current employer + companies with existing offers)
     if company_lower in EXCLUDED_COMPANIES:
         return False, f"Excluded company: {job.company}"
     if company_lower.startswith(EXCLUDED_COMPANY_PREFIXES):
         return False, f"Excluded company (prefix match): {job.company}"
 
-    # 4. Location must be Bengaluru or Remote
+    # 3. Location must match preferred locations
     loc_lower = job.location.lower()
-    location_ok = any(
-        term in loc_lower
-        for term in ["bengaluru", "bangalore", "remote", "work from home", "hybrid"]
-    )
+    preferred_locs_lower = [l.lower() for l in profile.preferred_locations]
+    # Always allow remote/hybrid unless specified otherwise
+    location_ok = any(term in loc_lower for term in preferred_locs_lower + ["remote", "work from home", "hybrid"])
     if not location_ok:
-        return False, f"Location not Bengaluru/Remote: '{job.location}'"
+        return False, f"Location not in preferred list: '{job.location}'"
 
-    # 5. Description must mention at least one of the candidate's technical keywords
+    # 4. Description must mention at least one of the candidate's technical keywords
     desc_lower = job.description.lower()
     tech_anchor_found = any(
         skill.lower() in desc_lower
         for skill in (profile.core_skills + profile.frameworks + profile.search_keywords)
     )
     if not tech_anchor_found:
-        return False, "No technical keywords found in description"
+        return False, "No relevant keywords found in description"
 
-    # 6. YOE pre-filter — drop clearly over-levelled jobs before Gemini sees them
+    # 5. YOE pre-filter — drop clearly over-levelled jobs before Gemini sees them
     yoe = _regex_min_yoe(job)
     if yoe is not None and yoe > profile.max_yoe_applying_for:
         return False, f"Over-levelled: regex found {yoe} YOE > threshold {profile.max_yoe_applying_for}"
@@ -380,4 +381,4 @@ def rank_and_filter_jobs(
         f"min score {min_score}/100, "
         f"capped at {target_output})"
     )
-    return finaln final
+    return final

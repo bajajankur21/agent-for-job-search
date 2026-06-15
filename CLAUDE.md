@@ -39,12 +39,20 @@ Agent 2  (publisher) →  uploads to S3           ← runs per-job
 The split is deliberate and drives most design decisions:
 
 - **Agent 0A (profiler)** — Claude Sonnet via **tool-use** (`produce_tailored_resume`-style forced tool call). Runs once per pipeline invocation.
-- **Agent 0B (scraper)** — `python-jobspy` hitting LinkedIn/Indeed/Glassdoor. Free, no API key. Each site is scraped separately per search term because LinkedIn honors `location` while Indeed needs `country_indeed`.
+- **Agent 0B (scraper)** — direct ATS scraping (Greenhouse, Lever, Ashby, Workable) via `agents/ats_scrapers/`. Free, no API key, no JS/browser needed — each ATS exposes a plain per-company JSON API whose `job_url` is the actual application form (1 hop, ideal for a future autonomous-apply agent), unlike LinkedIn/Indeed. None of these ATS platforms expose a cross-company "search by title" endpoint — each only returns one company's *entire* board — so `scrape_jobs` crawls every company token listed in `data/ats_companies.json` and lets Agent 0C's hard filter (below) do the title/location/skill relevance filtering that search terms used to do. See "ATS scraping" below for how `data/ats_companies.json` is built/grown. YC Jobs (workatastartup.com) is **not** covered — it's a Cloudflare-protected JS app with no public jobs API; would need Playwright-based scraping as a separate follow-up.
 - **Agent 0C (ranker)** — Gemini Flash Lite via **structured output** (`response_schema=list[_JobScore]`). A zero-cost Python hard filter (service-company blacklist, non-SDE title keywords, location check, regex YOE extraction) runs first so Gemini only scores survivors, in **one batched call** for all survivors.
 - **Agent 1 (tailor)** — two-tier routing in `main.py`:
   - **Top `TOP_TIER_CLAUDE_COUNT` jobs** (default 6): Claude Sonnet with **prompt caching on the master resume** (`cache_control: ephemeral`). Cached once, reused across every Claude call in the run (5-minute TTL). Tool-use for structured `TailoredAssets` output.
   - **Long tail**: `run_tailor_gemini` → **Gemma 4 31B** on AI Studio free tier (15 RPM, **unlimited TPM/RPD**). A module-level sliding-window limiter in `agent_1.py` (`_wait_for_gemma_rpm_slot`) throttles to 14 RPM (configurable via `GEMMA_RPM_LIMIT`) so the daily run never trips the RPM ceiling. Gemma on AI Studio has **no JSON mode** (`response_schema` / `response_mime_type` are rejected: `"JSON mode is not enabled for models/gemma-*-it"`), so structure is driven entirely by a strict prompt + `_extract_json_object` parser + Pydantic validation, with retries for both rate-limit and JSON/schema failures.
 - **Agent 2 (publisher)** — `agents/docx_renderer.py` patches `data/master_resume.docx` at fixed paragraph anchor indices (see below), converts to PDF via docx2pdf/LibreOffice, then boto3 uploads 3 files per job to S3 under `YYYY-MM-DD/Company_Title/{resume.pdf, form_answers.json, job_info.json}`.
+
+### ATS scraping (`agents/ats_scrapers/`, `data/ats_companies.json`)
+
+`agents/job_listing.py` holds the shared `JobListing` model + `_make_job_id`/`_normalize_for_id` (re-exported from `agents/agent_0b_scraper.py` for backward compat — `agent_0c_ranker.py` still does `from agents.agent_0b_scraper import JobListing`). `agents/ats_scrapers/{greenhouse,lever,ashby,workable}.py` each implement `fetch_jobs(token) -> list[JobListing]` against that ATS's public per-company API, returning `[]` on any error so a dead/renamed token never breaks a run.
+
+`agent_0b_scraper.scrape_jobs()` reads `data/ats_companies.json` (`{"greenhouse": [...tokens], "lever": [...], "ashby": [...], "workable": [...]}`), fetches every company concurrently (`ThreadPoolExecutor`, size = `ATS_FETCH_CONCURRENCY`, default 12), dedups by `job_id`, keeps jobs whose location is India/Remote/Hybrid (`agents.ats_scrapers.common.is_india_or_remote`) or matches `profile.preferred_locations`, and caps at `target_raw`.
+
+**Growing `data/ats_companies.json`**: `scripts/discover_ats_companies.py --ats {greenhouse,lever,ashby,workable} [--start N --limit M]` probes candidate company tokens (from the [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator) seed lists for GH/Lever/Ashby, a small hardcoded seed for Workable) and keeps any company with at least one India/Remote posting that doesn't look like a non-SDE role. It's resumable via `--start`/`--limit` since the seed lists are large (8K+ Greenhouse, 4K+ Lever, 3K+ Ashby tokens) — run in slices over time to grow coverage. Merges into the existing file, never shrinks it.
 
 ### Resume renderer anchor map
 
@@ -92,7 +100,7 @@ Required at runtime (`.env` locally, GitHub Secrets in CI):
 
 Tuning knobs (GitHub repo Variables, not Secrets):
 
-- `JOBSPY_SITES` (default `linkedin,indeed`), `JOBSPY_RESULTS_PER_SITE` (25), `JOBSPY_HOURS_OLD` (168), `JOBSPY_MAX_TERMS` (4)
+- `ATS_FETCH_CONCURRENCY` (default 12) — thread pool size for per-company ATS API calls in `scrape_jobs`.
 - `MODEL_*` overrides listed above. `MODEL_TAILORING_GEMINI` defaults to `gemma-4-31b-it`; swap to `gemma-3-27b-it` if you want higher RPM (30 vs 15) at the cost of a 14.4K RPD ceiling.
 - `TOP_TIER_CLAUDE_COUNT` (default 6) — how many top-scored jobs use Claude before the pipeline falls through to Gemma.
 - `GEMMA_RPM_LIMIT` (default 14) — client-side sliding-window cap for the Gemma tier. Keep it below the model's advertised RPM ceiling (15 for Gemma 4 31B, 30 for Gemma 3 27B).

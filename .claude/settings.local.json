@@ -4,7 +4,27 @@
       "Bash(python scripts/inspect_master_docx.py)",
       "Bash(python scripts/smoke_render.py)",
       "Bash(.venv/Scripts/python.exe -c ' *)",
-      "Bash(.venv/Scripts/python.exe list_models.py)"
+      "Bash(.venv/Scripts/python.exe list_models.py)",
+      "Bash(curl -s \"https://api.lever.co/v0/postings/rippling?mode=json\" -o /tmp/lever.json)",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s \"https://api.ashbyhq.com/posting-api/job-board/ramp\" -o /tmp/ashby.json)",
+      "Bash(curl -s \"https://apply.workable.com/api/v1/widget/accounts/postman\" -o /tmp/wk2.json)",
+      "Bash(curl -s \"https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=true\" -o /tmp/gh.json)",
+      "WebFetch(domain:workable.readme.io)",
+      "Bash(ls -la .venv)",
+      "Bash(find . -maxdepth 2 -iname \"*venv*\")",
+      "Bash(cat .python-version)",
+      "Bash(grep -rn \"python_requires\\\\|python-version\" requirements.txt pyproject.toml setup.py .github/workflows/*.yaml)",
+      "Bash(.venv/bin/python -c ' *)",
+      "Bash(.venv/bin/python --version)",
+      "Bash(.venv/bin/python -c \"import agents.agent_0c_ranker\")",
+      "Bash(.venv/bin/python3.11 --version)",
+      "Bash(.venv/bin/python3.11 -c ' *)",
+      "Bash(time .venv/bin/python3.11 scripts/discover_ats_companies.py --ats greenhouse --start 0 --limit 50 --concurrency 12)",
+      "Bash(.venv/bin/python3.11 scripts/discover_ats_companies.py --ats greenhouse --start 0 --limit 150 --concurrency 16)",
+      "Bash(.venv/bin/python3.11 scripts/discover_ats_companies.py --ats lever --start 0 --limit 150 --concurrency 16)",
+      "Bash(.venv/bin/python3.11 scripts/discover_ats_companies.py --ats ashby --start 0 --limit 150 --concurrency 16)",
+      "Bash(.venv/bin/python3.11 scripts/discover_ats_companies.py --ats workable --concurrency 8)"
     ]
   }
 }

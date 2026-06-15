@@ -1,0 +1,54 @@
+name: Grow ATS Company Directory
+
+on:
+  schedule:
+    # 21:00 UTC = 2:30 AM IST — well clear of the 03:30/12:30 UTC pipeline runs
+    - cron: '0 21 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  discover:
+    name: Discover new ATS companies
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run discovery for each ATS (resumable chunks)
+        run: |
+          python scripts/discover_ats_companies.py --ats greenhouse --auto --chunk-size 200 --concurrency 16
+          python scripts/discover_ats_companies.py --ats lever --auto --chunk-size 200 --concurrency 16
+          python scripts/discover_ats_companies.py --ats ashby --auto --chunk-size 200 --concurrency 16
+          python scripts/discover_ats_companies.py --ats workable --auto --chunk-size 200 --concurrency 8
+
+      - name: Open PR with updated company directory
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: grow ATS company directory (automated discovery)"
+          title: "chore: grow ATS company directory"
+          body: |
+            Automated daily discovery run.
+
+            - Adds newly-found India/Remote-relevant companies to `data/ats_companies.json`
+            - Advances the resumable scan position in `data/discovery_progress.json`
+
+            Safe to merge — this data only ever grows, never shrinks.
+          branch: automated/discover-ats-companies
+          delete-branch: true
+          add-paths: |
+            data/ats_companies.json
+            data/discovery_progress.json

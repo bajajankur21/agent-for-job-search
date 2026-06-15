@@ -24,7 +24,12 @@
       "Bash(.venv/bin/python3.11 scripts/discover_ats_companies.py --ats greenhouse --start 0 --limit 150 --concurrency 16)",
       "Bash(.venv/bin/python3.11 scripts/discover_ats_companies.py --ats lever --start 0 --limit 150 --concurrency 16)",
       "Bash(.venv/bin/python3.11 scripts/discover_ats_companies.py --ats ashby --start 0 --limit 150 --concurrency 16)",
-      "Bash(.venv/bin/python3.11 scripts/discover_ats_companies.py --ats workable --concurrency 8)"
+      "Bash(.venv/bin/python3.11 scripts/discover_ats_companies.py --ats workable --concurrency 8)",
+      "Bash(.venv/bin/python3.11 scripts/discover_ats_companies.py --ats workable --auto --chunk-size 200 --concurrency 8)",
+      "Bash(.venv/bin/python3.11 -c \"import scripts.discover_ats_companies\")",
+      "Bash(.venv/bin/python3.11 scripts/discover_ats_companies.py --help)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

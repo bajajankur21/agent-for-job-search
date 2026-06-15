@@ -12,6 +12,12 @@ Usage:
     python scripts/discover_ats_companies.py --ats ashby
     python scripts/discover_ats_companies.py --ats workable
 
+    # Resumable "auto" mode (used by the scheduled discovery workflow):
+    # processes the next --chunk-size companies after wherever the last
+    # --auto run for this ATS left off, tracked in data/discovery_progress.json,
+    # and wraps back to the start of the seed list once it reaches the end.
+    python scripts/discover_ats_companies.py --ats greenhouse --auto --chunk-size 200
+
 Resumable: pass --start/--limit to process the big token lists in slices
 across multiple runs. Survivors are merged into data/ats_companies.json
 (existing entries are kept, duplicates de-duped).
@@ -34,6 +40,7 @@ logger = logging.getLogger(__name__)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 COMPANIES_FILE = os.path.join(ROOT, "data", "ats_companies.json")
+PROGRESS_FILE = os.path.join(ROOT, "data", "discovery_progress.json")
 
 SEED_LIST_URLS = {
     "greenhouse": "https://raw.githubusercontent.com/Feashliaa/job-board-aggregator/main/data/greenhouse_companies.json",
@@ -51,15 +58,51 @@ WORKABLE_SEED = [
 ]
 
 
-def _candidate_tokens(ats: str, start: int, limit: int | None) -> list[str]:
+def _full_token_list(ats: str) -> list[str]:
     if ats == "workable":
-        tokens = WORKABLE_SEED
-    else:
-        tokens = get_json(SEED_LIST_URLS[ats]) or []
+        return WORKABLE_SEED
+    return get_json(SEED_LIST_URLS[ats]) or []
 
+
+def _candidate_tokens(ats: str, start: int, limit: int | None) -> list[str]:
+    tokens = _full_token_list(ats)
     if limit is not None:
         return tokens[start:start + limit]
     return tokens[start:]
+
+
+def _auto_candidate_tokens(ats: str, chunk_size: int, progress: dict[str, int]) -> tuple[list[str], int]:
+    """Resumable slice: the next `chunk_size` tokens after wherever the last
+    --auto run for this ATS left off, wrapping back to the start of the seed
+    list once it reaches the end. Returns (candidates, next_start)."""
+    tokens = _full_token_list(ats)
+    total = len(tokens)
+    if total == 0:
+        return [], 0
+
+    chunk = min(chunk_size, total)
+    start = progress.get(ats, 0) % total
+    end = start + chunk
+    if end <= total:
+        candidates = tokens[start:end]
+        next_start = end % total
+    else:
+        candidates = tokens[start:] + tokens[:end - total]
+        next_start = end - total
+    return candidates, next_start
+
+
+def _load_progress() -> dict[str, int]:
+    if os.path.exists(PROGRESS_FILE):
+        with open(PROGRESS_FILE) as f:
+            return json.load(f)
+    return {}
+
+
+def _save_progress(progress: dict[str, int]) -> None:
+    with open(PROGRESS_FILE, "w") as f:
+        json.dump(progress, f, indent=2, sort_keys=True)
+        f.write("\n")
 
 
 def _looks_sde_relevant(title: str) -> bool:
@@ -94,11 +137,25 @@ def main():
     parser.add_argument("--start", type=int, default=0, help="Start offset into the candidate token list")
     parser.add_argument("--limit", type=int, default=None, help="Number of candidates to probe")
     parser.add_argument("--concurrency", type=int, default=12)
+    parser.add_argument("--auto", action="store_true",
+                         help="Resumable mode: process the next --chunk-size tokens after "
+                              "wherever the last --auto run for this ATS left off "
+                              "(tracked in data/discovery_progress.json), wrapping around "
+                              "at the end of the seed list. Overrides --start/--limit.")
+    parser.add_argument("--chunk-size", type=int, default=200,
+                         help="Number of candidates to probe per --auto run (default 200)")
     args = parser.parse_args()
 
     fetch_jobs = FETCHERS[args.ats]
-    candidates = _candidate_tokens(args.ats, args.start, args.limit)
-    logger.info(f"Probing {len(candidates)} {args.ats} candidates (start={args.start}, limit={args.limit})...")
+    progress = _load_progress()
+
+    if args.auto:
+        candidates, next_start = _auto_candidate_tokens(args.ats, args.chunk_size, progress)
+        logger.info(f"[auto] Probing {len(candidates)} {args.ats} candidates "
+                     f"(resuming from progress, chunk_size={args.chunk_size})...")
+    else:
+        candidates = _candidate_tokens(args.ats, args.start, args.limit)
+        logger.info(f"Probing {len(candidates)} {args.ats} candidates (start={args.start}, limit={args.limit})...")
 
     companies = _load_companies()
     existing = set(companies.setdefault(args.ats, []))
@@ -118,6 +175,10 @@ def main():
     new_tokens = set(kept) - existing
     companies[args.ats] = sorted(existing | new_tokens)
     _save_companies(companies)
+
+    if args.auto:
+        progress[args.ats] = next_start
+        _save_progress(progress)
 
     logger.info(
         f"\n{args.ats}: kept {len(kept)}/{len(candidates)} candidates "

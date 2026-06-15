@@ -54,6 +54,8 @@ The split is deliberate and drives most design decisions:
 
 **Growing `data/ats_companies.json`**: `scripts/discover_ats_companies.py --ats {greenhouse,lever,ashby,workable} [--start N --limit M]` probes candidate company tokens (from the [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator) seed lists for GH/Lever/Ashby, a small hardcoded seed for Workable) and keeps any company with at least one India/Remote posting that doesn't look like a non-SDE role. It's resumable via `--start`/`--limit` since the seed lists are large (8K+ Greenhouse, 4K+ Lever, 3K+ Ashby tokens) — run in slices over time to grow coverage. Merges into the existing file, never shrinks it.
 
+**Automated growth**: `.github/workflows/discover-ats-companies.yaml` runs daily (21:00 UTC) via `--auto --chunk-size 200`, which tracks the next start offset per ATS in `data/discovery_progress.json` (wrapping back to the start once it cycles through the whole seed list) and opens a PR with any updates to `data/ats_companies.json` + `data/discovery_progress.json` for review/merge.
+
 ### Resume renderer anchor map
 
 `agents/docx_renderer.py` rewrites only specific paragraphs by index — it never touches paragraph-level formatting (bullets, indentation, fonts). The anchor map is tied to the exact structure of `data/master_resume.docx`. **If you add/remove a bullet, role, or section from the master DOCX, re-run `scripts/inspect_master_docx.py` and update the map.**

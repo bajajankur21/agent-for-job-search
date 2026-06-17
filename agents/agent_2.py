@@ -94,6 +94,7 @@ def publish_to_s3(
         "location": job.location,
         "score": score,
         "apply_url": job.job_url,
+        "source": job.source,
         "date_posted": job.date_posted,
         "date_processed": datetime.now().strftime("%Y-%m-%d"),
     }

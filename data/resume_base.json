@@ -1,0 +1,20 @@
+{
+  "header": { "separator": "❖" },
+  "projects": [
+    {
+      "name": "Spring Code Forger",
+      "bullets": [
+        "**Agentic Codegen:** Built a multi-agent system that ingests **Swagger/OpenAPI** specs and auto-generates production-ready **Spring Boot** CRUD scaffolding (controllers, services, repos, DTOs).",
+        "**LLM Orchestration:** Designed an agent-per-layer pipeline using **LangChain + Claude**, cutting boilerplate authoring time by **~70%** for new microservices."
+      ]
+    },
+    {
+      "name": "TestForge",
+      "bullets": [
+        "**Test Automation:** Built a multi-agent workflow that generates **Selenium/Playwright** automation tests from plain-English user stories, reducing manual QA effort.",
+        "**Agentic Pipeline:** Coordinated planner → writer → validator agents for self-healing test generation against live app DOM."
+      ]
+    }
+  ],
+  "section_order": ["experience", "projects", "education", "skills"]
+}

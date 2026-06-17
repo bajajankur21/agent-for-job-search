@@ -2,6 +2,7 @@ import os
 import re
 import json
 import logging
+from typing import Optional
 from agents.agent_0a_profiler import CandidateProfile
 from agents.agent_0b_scraper import JobListing
 from dotenv import load_dotenv
@@ -105,7 +106,7 @@ _TITLE_SENIORITY_MAP = [
 ]
 
 
-def _regex_min_yoe(job: JobListing) -> int | None:
+def _regex_min_yoe(job: JobListing) -> Optional[int]:
     """
     Extracts minimum YOE from title + description using regex.
     Returns an int if found confidently, None if ambiguous.

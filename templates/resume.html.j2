@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><link rel="stylesheet" href="resume.css"></head>
+<body>
+  <header class="masthead">
+    <h1 class="name">{{ name }}</h1>
+    <div class="contact">
+      {% for c in contact %}{{ c }}{% if not loop.last %} <span class="sep">{{ separator }}</span> {% endif %}{% endfor %} <span class="sep">{{ separator }}</span>
+    </div>
+  </header>
+
+  {% for section in section_order %}
+    {% if section == "experience" %}
+      <section><h2 class="section-title">Work Experience</h2>
+        {% for role in experience %}
+          <div class="role-row"><span class="org">{{ role.company }}</span><span class="dates">{{ role.dates }}</span></div>
+          <div class="role-row"><span class="role-title">{{ role.title }}</span><span class="loc">{{ role.location }}</span></div>
+          <ul>{% for b in role.bullets %}<li>{{ b | md_bold }}</li>{% endfor %}</ul>
+        {% endfor %}
+      </section>
+    {% elif section == "projects" %}
+      <section><h2 class="section-title">Projects</h2>
+        {% for p in projects %}
+          <div class="proj-name">{{ p.name }}</div>
+          <ul>{% for b in p.bullets %}<li>{{ b | md_bold }}</li>{% endfor %}</ul>
+        {% endfor %}
+      </section>
+    {% elif section == "education" %}
+      <section><h2 class="section-title">Education</h2>
+        <div class="edu-line">{{ education.institution }} | {{ education.degree }} | {{ education.date }}</div>
+        <ul>{% for b in education.bullets %}<li>{{ b | md_bold }}</li>{% endfor %}</ul>
+      </section>
+    {% elif section == "skills" %}
+      <section><h2 class="section-title">Certifications, Skills &amp; Interests</h2>
+        <ul class="skills">
+          {% for cat, items in skills.items() %}<li><strong>{{ cat }}:</strong> {{ items | join(", ") }}.</li>{% endfor %}
+          <li><strong>Interests:</strong> {{ interests }}{% if not interests.endswith(".") %}.{% endif %}</li>
+        </ul>
+      </section>
+    {% endif %}
+  {% endfor %}
+</body>
+</html>

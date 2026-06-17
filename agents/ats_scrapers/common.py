@@ -1,6 +1,7 @@
 import re
 import html
 import logging
+from typing import Optional
 import requests
 
 logger = logging.getLogger(__name__)
@@ -19,7 +20,7 @@ INDIA_OR_REMOTE_TERMS = (
 _INDIA_RE = re.compile(r"\bindia\b")
 
 
-def get_json(url: str, params: dict | None = None):
+def get_json(url: str, params: Optional[dict] = None):
     """GET a JSON endpoint. Returns the parsed body, or None on any failure
     (404/network error/non-JSON) so a dead or renamed company token never
     breaks the run."""

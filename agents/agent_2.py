@@ -12,6 +12,7 @@ from agents.agent_0b_scraper import JobListing
 from agents.agent_1 import TailoredAssets
 from agents.docx_renderer import render_tailored_docx
 from agents.pdf_converter import convert_docx_to_pdf
+from agents.html_renderer import render_resume_pdf
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -35,18 +36,12 @@ def publish_to_s3(
     S3 key structure: YYYY-MM-DD/CompanyName_RoleTitle/filename
 
     Resume pipeline: patch master DOCX → LibreOffice/docx2pdf → upload PDF.
-    The CandidateProfile arg is retained for API compatibility with main.py
-    even though the renderer reads identity info directly from the master DOCX.
+    # The CandidateProfile arg is retained for API compatibility with main.py.
+    # If RESUME_RENDERER=html, we use it to populate the header.
     """
-    del profile  # unused — master DOCX already carries the header/contact info
-
     bucket_name = os.getenv("AWS_S3_BUCKET")
     if not bucket_name:
         raise EnvironmentError("AWS_S3_BUCKET not set")
-    if not _MASTER_DOCX_PATH.exists():
-        raise FileNotFoundError(
-            f"Master DOCX not found at {_MASTER_DOCX_PATH} — required for rendering"
-        )
 
     s3 = boto3.client("s3")
     date_prefix = datetime.now().strftime("%Y-%m-%d")
@@ -56,9 +51,19 @@ def publish_to_s3(
 
     uploads = {}
 
-    # 1. Resume PDF — patch master.docx in-memory, then convert to PDF.
-    docx_bytes = render_tailored_docx(assets, _MASTER_DOCX_PATH)
-    resume_bytes = convert_docx_to_pdf(docx_bytes)
+    # 1. Resume PDF — render HTML template or patch master.docx.
+    if os.getenv("RESUME_RENDERER", "html") == "html":
+        logger.info("Using HTML renderer for resume PDF")
+        resume_bytes = render_resume_pdf(assets, profile)
+    else:
+        logger.info("Using DOCX renderer for resume PDF")
+        if not _MASTER_DOCX_PATH.exists():
+            raise FileNotFoundError(
+                f"Master DOCX not found at {_MASTER_DOCX_PATH} — required for DOCX rendering"
+            )
+        docx_bytes = render_tailored_docx(assets, _MASTER_DOCX_PATH)
+        resume_bytes = convert_docx_to_pdf(docx_bytes)
+
     resume_key = f"{folder}/resume.pdf"
     s3.put_object(
         Bucket=bucket_name,
@@ -68,6 +73,7 @@ def publish_to_s3(
     )
     uploads["resume"] = resume_key
     logger.info(f"Uploaded resume: {resume_key}")
+
 
     # 2. Form answers JSON
     form_key = f"{folder}/form_answers.json"

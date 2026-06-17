@@ -103,6 +103,25 @@ _PROFILE_JSON_TEMPLATE = """{
   "raw_summary": "<one paragraph summary>"
 }"""
 
+_PROFILE_OVERRIDES_PATH = Path("data/candidate_profile_overrides.json")
+
+
+def _load_profile_overrides() -> dict:
+    try:
+        return json.loads(_PROFILE_OVERRIDES_PATH.read_text())
+    except FileNotFoundError:
+        return {}
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Failed to parse {_PROFILE_OVERRIDES_PATH}: {e}") from e
+
+
+def _apply_profile_overrides(profile: CandidateProfile, overrides: dict) -> CandidateProfile:
+    data = profile.model_dump()
+    for key, value in overrides.items():
+        if key in data:
+            data[key] = value
+    return CandidateProfile(**data)
+
 
 PROFILE_EXTRACTION_PROMPT = """
 You are an expert technical recruiter. Extract a structured candidate profile from the resume text below.
@@ -112,6 +131,8 @@ Today's date is: {today_date}
 Rules:
 - Work with whatever information is present. Do not require specific sections or formats.
 - If a field cannot be determined, use a sensible default — never omit a field.
+- Extract contact info from the resume header/contact block when present: email, phone, LinkedIn URL, GitHub URL, and city.
+- For linkedin/github, preserve the exact profile URL or handle as written in the resume. Do not invent URLs.
 - For total_yoe: calculate from work history dates. "Present" means today ({today_date}). Include ALL roles — full-time AND internships — in the total. Round to nearest 0.5.
 - For seniority: infer from titles, YOE, and scope of responsibilities.
 - For search_keywords: generate 8-12 SHORT job title keywords (1-3 words each) for Google Jobs search. These will be used directly as search queries, so make them seniority-appropriate. For junior/entry-level candidates, include role variants like "Junior Developer", "SDE 1", "Associate Engineer", "Graduate Engineer". For mid-level, include both plain and "SDE II" style. For senior, include "Senior", "Lead". Always include plain role titles (e.g. "Backend Engineer") alongside seniority-qualified ones. Each keyword must work as a standalone search term.
@@ -157,6 +178,7 @@ def build_candidate_profile(resume_pdf_path: str) -> CandidateProfile:
     )
 
     logger.info("Building candidate profile with Gemma (prompt-driven JSON)...")
+    overrides = _load_profile_overrides()
 
     last_err: Exception | None = None
     last_raw = ""
@@ -170,6 +192,7 @@ def build_candidate_profile(resume_pdf_path: str) -> CandidateProfile:
             )
             data = json.loads(_extract_json_object(last_raw))
             profile = CandidateProfile(**data)
+            profile = _apply_profile_overrides(profile, overrides)
             break
         except (json.JSONDecodeError, ValidationError, ValueError) as e:
             last_err = e

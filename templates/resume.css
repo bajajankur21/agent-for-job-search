@@ -1,0 +1,42 @@
+:root {
+  --body-font-size: 10.5pt;
+  --name-font-size: 24pt;
+  --contact-font-size: 11pt;
+  --section-font-size: 11pt;
+  --section-margin-top: 8pt;
+  --section-margin-bottom: 4pt;
+  --list-margin-y: 2pt;
+  --li-margin-y: 1.5pt;
+}
+
+@page { size: letter; margin: 0.5in 0.6in; }
+
+@font-face { font-family: "ResumeGaramond"; font-weight: 400; font-style: normal;
+             src: url("fonts/EBGaramond-Regular.ttf") format("truetype"); }
+@font-face { font-family: "ResumeGaramond"; font-weight: 700; font-style: normal;
+             src: url("fonts/EBGaramond-Bold.ttf") format("truetype"); }
+@font-face { font-family: "ResumeGaramond"; font-weight: 400; font-style: italic;
+             src: url("fonts/EBGaramond-Italic.ttf") format("truetype"); }
+@font-face { font-family: "ResumeGaramond"; font-weight: 700; font-style: italic;
+             src: url("fonts/EBGaramond-BoldItalic.ttf") format("truetype"); }
+
+body { font-family: "ResumeGaramond", serif;
+       font-size: var(--body-font-size); line-height: 1.1; color: #000; }
+
+.name { font-size: var(--name-font-size); font-weight: bold; margin: 0; }
+.contact { font-size: var(--contact-font-size); margin: 2pt 0 5pt; }
+.sep { font-size: 0.85em; vertical-align: 1px; }
+
+.section-title { font-weight: bold; text-transform: uppercase; font-size: var(--section-font-size);
+                 border-bottom: 1px solid #000; margin: var(--section-margin-top) 0 var(--section-margin-bottom); padding-bottom: 1pt; }
+
+.role-row { display: flex; justify-content: space-between; }
+.org { font-weight: bold; }
+.role-title, .loc { font-style: italic; }
+.dates { font-weight: bold; }
+.proj-name, .edu-line { font-weight: bold; margin-top: 2pt; }
+
+ul { list-style: none; margin: var(--list-margin-y) 0; padding-left: 14pt; }
+li { position: relative; margin: var(--li-margin-y) 0; }
+li::before { content: "▪"; position: absolute; left: -12pt; font-size: 0.7em; top: 0.15em; }
+ul.skills li { margin: 1pt 0; }
